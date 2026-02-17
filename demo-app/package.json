@@ -1,0 +1,21 @@
+{
+  "name": "vulnerable-banking-api",
+  "version": "1.0.0",
+  "description": "Intentionally vulnerable banking API for DevSecOps Guardian demo",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "seed": "node seed.js",
+    "dev": "node seed.js && node server.js"
+  },
+  "keywords": ["security", "demo", "vulnerable", "devsecops"],
+  "author": "Soluciones Etech Corp",
+  "license": "MIT",
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "better-sqlite3": "^11.8.1",
+    "dotenv": "^16.4.7",
+    "express": "^5.0.1",
+    "jsonwebtoken": "^9.0.2"
+  }
+}
