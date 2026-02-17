@@ -63,11 +63,12 @@ A **multi-agent AI security pipeline** for banking applications. Four specialize
 | `github_create_pr` | Write | Fixer |
 | `github_post_pr_comment` | Write | Fixer |
 
-### 3. Scanner Agent (IN PROGRESS) 🔧
+### 3. Scanner Agent (COMPLETE) ✅
 **Location**: `agents/scanner/`
 - Reads files from GitHub via MCP tools
 - Sends to Azure OpenAI (gpt-4.1-mini) for security analysis
-- **Last test**: Detected 7 of 8 vulnerabilities (missing bcrypt false positive, which is fine - Analyzer handles that)
+- **Last test**: Detected 6 of 8 vulnerabilities (correctly excludes the 2 false positives - Analyzer handles those)
+- Smart scan bug (escaped braces) **FIXED AND VERIFIED**
 
 **Files:**
 | File | Purpose | Status |
@@ -77,31 +78,26 @@ A **multi-agent AI security pipeline** for banking applications. Four specialize
 | `github_client.py` | Reads files via GitHub MCP tools | ✅ |
 | `llm_engine.py` | Calls Azure OpenAI for analysis | ✅ |
 | `scanner.py` | Main orchestrator + CLI | ✅ |
-| `smart_scan.py` | Smart scan strategy for large repos | ⚠️ HAS A BUG - see below |
+| `smart_scan.py` | Smart scan strategy for large repos | ✅ |
 
-**CURRENT BUG**: `smart_scan.py` had a `KeyError` because JSON curly braces in the `CONTEXT_MAP_PROMPT` conflicted with Python's `.format()`. The fix was to escape braces as `{{` and `}}` in the prompt template. The `CONTEXT_MAP_PROMPT` was fixed but needs to be **retested**. The `GROUPED_SCAN_PROMPT` already uses escaped braces and should be fine.
-
-**To test**: 
-```bash
-cd agents/scanner
-python scanner.py --path demo-app
-```
-
-**Expected output**: Phase 1 builds context map → Phase 2 scans with context → Phase 3 deduplicates → 7-8 findings
-
----
-
-## ❌ What's NOT Built Yet
-
-### 4. Analyzer Agent (NEXT)
-**Location**: `agents/analyzer/` (empty)
-- Takes Scanner findings + full source code
-- For each finding, reasons about exploitability:
+### 4. Analyzer Agent (COMPLETE) ✅
+**Location**: `agents/analyzer/`
+- Takes Scanner findings + full source code from GitHub
+- For each finding, reasons about exploitability via LLM:
   - Is this endpoint public or behind auth?
   - Is input sanitized upstream?
   - Is the data sensitive (PCI, PII)?
-- Outputs: confirmed/false_positive status, exploitability score (0-100)
-- **Expected**: Takes 8 raw findings → outputs 6 confirmed + 2 false positives (items 6 and 7)
+- Outputs: confirmed/false_positive verdict, exploitability score (0-100)
+- **Last test**: All 6 scanner findings correctly analyzed as CONFIRMED with scores 80-95
+
+**Files:**
+| File | Purpose | Status |
+|------|---------|--------|
+| `config.py` | Configuration from .env | ✅ |
+| `prompts.py` | LLM system prompt + analysis templates | ✅ |
+| `github_client.py` | Reads source files via GitHub MCP | ✅ |
+| `llm_engine.py` | Calls Azure OpenAI for contextual analysis | ✅ |
+| `analyzer.py` | Main orchestrator + CLI | ✅ |
 
 ### 5. Fixer Agent
 **Location**: `agents/fixer/` (empty)
@@ -131,7 +127,7 @@ python scanner.py --path demo-app
 
 ### Azure OpenAI (Foundry)
 - **Endpoint**: `https://devsecops-guardian-hackaton-etec.services.ai.azure.com/`
-- **API Key**: In `agents/scanner/.env` (DO NOT COMMIT)
+- **API Key**: In `agents/scanner/.env` and `agents/analyzer/.env` (DO NOT COMMIT)
 - **Project**: `devsecops-guardian-hackaton-etech`
 - **Deployed models**: `gpt-4.1-mini` (practice, cheap), `o4-mini` (final video, better quality)
 - **API Version**: `2024-12-01-preview`
@@ -181,16 +177,23 @@ devsecops-guardian/
 │       ├── pyproject.toml
 │       └── README.md
 ├── agents/
-│   └── scanner/                 # 🔧 Scanner Agent (in progress)
+│   └── scanner/                 # ✅ Scanner Agent
 │       ├── config.py
 │       ├── prompts.py
 │       ├── github_client.py
 │       ├── llm_engine.py
 │       ├── scanner.py
-│       ├── smart_scan.py       # ⚠️ Bug fixed but untested
+│       ├── smart_scan.py
 │       ├── requirements.txt
 │       └── .env.example
-│   ├── analyzer/                # ❌ Not built
+│   ├── analyzer/                # ✅ Analyzer Agent
+│       ├── config.py
+│       ├── prompts.py
+│       ├── github_client.py
+│       ├── llm_engine.py
+│       ├── analyzer.py
+│       ├── requirements.txt
+│       └── .env.example
 │   ├── fixer/                   # ❌ Not built
 │   └── compliance/              # ❌ Not built
 ├── docs/                        # Empty - architecture diagrams later
@@ -204,10 +207,10 @@ devsecops-guardian/
 ## 🏗️ Build Priority Order
 
 1. ~~GitHub MCP Server~~ ✅
-2. ~~Scanner Agent~~ 🔧 (smart_scan needs retest)
-3. **Analyzer Agent** ← NEXT
-4. Fixer Agent
-5. Compliance Agent  
+2. ~~Scanner Agent~~ ✅
+3. ~~Analyzer Agent~~ ✅
+4. **Fixer Agent** <- NEXT
+5. Compliance Agent
 6. Azure DevOps Pipeline (last - just trigger/glue)
 7. Demo Video
 
@@ -230,4 +233,4 @@ Contains: problem statement, architecture, demo flow, competitive analysis, buil
 
 ---
 
-*Last updated: February 17, 2026 ~4:00 PM EST*
+*Last updated: February 17, 2026 ~5:00 PM EST*
