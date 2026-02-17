@@ -1,0 +1,233 @@
+# DevSecOps Guardian - Project Status & Context
+
+## 🎯 Hackathon Info
+- **Hackathon**: Microsoft AI Dev Days 2026
+- **Track**: Agentic DevOps ($20K Grand Prize)
+- **Team**: Soluciones Etech Corp (Freddy Urbano - furbano@soluetech.com)
+- **Deadline**: March 15, 2026
+- **Repo**: https://github.com/freddan58/devsecops-guardian
+
+---
+
+## 📋 What Is DevSecOps Guardian?
+
+A **multi-agent AI security pipeline** for banking applications. Four specialized AI agents replace traditional SAST tools (SonarQube, Checkmarx, Fortify):
+
+1. **Scanner Agent** - LLM-based code security scanner (detects vulns using AI reasoning, not regex)
+2. **Analyzer Agent** - False positive eliminator (contextual analysis: is this actually exploitable?)
+3. **Fixer Agent** - Auto-generates draft PRs with code fixes
+4. **Compliance Agent** - Generates audit-ready reports mapped to PCI-DSS 4.0
+
+**Key differentiator**: Multi-agent architecture on Microsoft Foundry + compliance reporting (no competitor has this).
+
+---
+
+## ✅ What's Been Built (as of Feb 17, 2026)
+
+### 1. Demo App (COMPLETE) ✅
+**Location**: `demo-app/`
+- Node.js/Express banking API with **8 intentionally planted vulnerabilities**
+- SQLite database with sample data (users, accounts, transfers)
+- Tested and working: `npm run seed && npm start` on port 3000
+- SQL injection confirmed exploitable: `GET /api/accounts?id=1%20OR%201=1` dumps all accounts
+
+**Planted Vulnerabilities:**
+
+| # | Vulnerability | File | CWE | Expected Result |
+|---|--------------|------|-----|-----------------|
+| 1 | SQL Injection | routes/accounts.js | CWE-89 | CONFIRMED - public endpoint, string concat |
+| 2 | Reflected XSS | routes/search.js | CWE-79 | CONFIRMED - user input in HTML |
+| 3 | Hardcoded API Key | config/database.js | CWE-798 | CONFIRMED - secrets in source |
+| 4 | Missing Auth | routes/users.js (DELETE) | CWE-862 | CONFIRMED - no auth on destructive endpoint |
+| 5 | IDOR | routes/transfers.js | CWE-639 | CONFIRMED - no ownership check |
+| 6 | SQL Query (parameterized) | routes/balance.js | CWE-89 | FALSE POSITIVE - behind JWT + prepared stmt |
+| 7 | Weak Crypto (bcrypt) | utils/auth.js | CWE-328 | FALSE POSITIVE - bcrypt is acceptable |
+| 8 | Logging PII | middleware/logger.js | CWE-532 | CONFIRMED - logs account numbers/SSN |
+
+### 2. GitHub MCP Server (COMPLETE) ✅
+**Location**: `mcp-servers/github/`
+- Python MCP server with **9 tools** for GitHub API interaction
+- All agents use this to read/write to the repo
+- **Tests passing**: 2/2 (list files + read file content)
+
+**Tools:**
+| Tool | Type | Used By |
+|------|------|---------|
+| `github_read_file` | Read | Scanner, Analyzer |
+| `github_list_files` | Read | Scanner |
+| `github_read_pr_diff` | Read | Scanner |
+| `github_list_pr_files` | Read | Scanner |
+| `github_get_pr` | Read | Compliance |
+| `github_create_branch` | Write | Fixer |
+| `github_create_or_update_file` | Write | Fixer |
+| `github_create_pr` | Write | Fixer |
+| `github_post_pr_comment` | Write | Fixer |
+
+### 3. Scanner Agent (IN PROGRESS) 🔧
+**Location**: `agents/scanner/`
+- Reads files from GitHub via MCP tools
+- Sends to Azure OpenAI (gpt-4.1-mini) for security analysis
+- **Last test**: Detected 7 of 8 vulnerabilities (missing bcrypt false positive, which is fine - Analyzer handles that)
+
+**Files:**
+| File | Purpose | Status |
+|------|---------|--------|
+| `config.py` | Configuration from .env | ✅ |
+| `prompts.py` | LLM system prompt + templates | ✅ |
+| `github_client.py` | Reads files via GitHub MCP tools | ✅ |
+| `llm_engine.py` | Calls Azure OpenAI for analysis | ✅ |
+| `scanner.py` | Main orchestrator + CLI | ✅ |
+| `smart_scan.py` | Smart scan strategy for large repos | ⚠️ HAS A BUG - see below |
+
+**CURRENT BUG**: `smart_scan.py` had a `KeyError` because JSON curly braces in the `CONTEXT_MAP_PROMPT` conflicted with Python's `.format()`. The fix was to escape braces as `{{` and `}}` in the prompt template. The `CONTEXT_MAP_PROMPT` was fixed but needs to be **retested**. The `GROUPED_SCAN_PROMPT` already uses escaped braces and should be fine.
+
+**To test**: 
+```bash
+cd agents/scanner
+python scanner.py --path demo-app
+```
+
+**Expected output**: Phase 1 builds context map → Phase 2 scans with context → Phase 3 deduplicates → 7-8 findings
+
+---
+
+## ❌ What's NOT Built Yet
+
+### 4. Analyzer Agent (NEXT)
+**Location**: `agents/analyzer/` (empty)
+- Takes Scanner findings + full source code
+- For each finding, reasons about exploitability:
+  - Is this endpoint public or behind auth?
+  - Is input sanitized upstream?
+  - Is the data sensitive (PCI, PII)?
+- Outputs: confirmed/false_positive status, exploitability score (0-100)
+- **Expected**: Takes 8 raw findings → outputs 6 confirmed + 2 false positives (items 6 and 7)
+
+### 5. Fixer Agent
+**Location**: `agents/fixer/` (empty)
+- Takes confirmed findings from Analyzer
+- For each finding: creates security/ branch, generates fix, creates draft PR
+- Human-in-the-loop: developer reviews and merges
+- Uses GitHub MCP write tools (create_branch, create_or_update_file, create_pr)
+
+### 6. Compliance Agent
+**Location**: `agents/compliance/` (empty)
+- Takes full pipeline results (Scanner → Analyzer → Fixer)
+- Maps findings to PCI-DSS 4.0 controls (Req 6.2.4, 6.3.1, 8.3)
+- Generates Markdown/PDF report with evidence trail
+- **KILLER DIFFERENTIATOR** - no competitor has this
+
+### 7. Azure DevOps Pipeline
+- Triggers the 4-agent pipeline on PR creation
+- NOT using GitHub Actions (billing concerns - previously charged $5K)
+- Azure Pipelines strengthens "Best Azure Integration" category
+
+### 8. Demo Video (2 min)
+- Record the full pipeline: PR → Scanner → Analyzer → Fixer → Compliance Report
+
+---
+
+## 🔧 Technical Details
+
+### Azure OpenAI (Foundry)
+- **Endpoint**: `https://devsecops-guardian-hackaton-etec.services.ai.azure.com/`
+- **API Key**: In `agents/scanner/.env` (DO NOT COMMIT)
+- **Project**: `devsecops-guardian-hackaton-etech`
+- **Deployed models**: `gpt-4.1-mini` (practice, cheap), `o4-mini` (final video, better quality)
+- **API Version**: `2024-12-01-preview`
+
+### GitHub Token
+- **Token**: Fine-grained PAT in `mcp-servers/github/.env` and `agents/scanner/.env`
+- **Scopes**: Contents (R/W), Pull Requests (R/W), Metadata (Read)
+- **Name**: `devsecops-guardian-hackathon`
+
+### Environment Files (.env) - ALL in .gitignore
+- `mcp-servers/github/.env` - GITHUB_TOKEN
+- `agents/scanner/.env` - AZURE_OPENAI_* + GITHUB_TOKEN
+- (future) `agents/analyzer/.env`
+- (future) `agents/fixer/.env`
+- (future) `agents/compliance/.env`
+
+### Key Dependencies
+- **Python 3.12** (installed on machine)
+- **Node.js** (for demo-app)
+- `httpx` - async HTTP client for GitHub + Azure OpenAI APIs
+- `python-dotenv` - .env loading
+- `mcp[cli]` - MCP server framework (FastMCP)
+- `pydantic` - input validation
+
+---
+
+## 📁 Repository Structure
+```
+devsecops-guardian/
+├── demo-app/                    # ✅ Vulnerable banking API (Node.js)
+│   ├── config/database.js       # VULN #3: Hardcoded secrets
+│   ├── middleware/auth.js       # JWT authentication
+│   ├── middleware/logger.js     # VULN #8: PII logging
+│   ├── routes/accounts.js      # VULN #1: SQL Injection
+│   ├── routes/balance.js       # FALSE POSITIVE #6: Safe parameterized SQL
+│   ├── routes/search.js        # VULN #2: XSS
+│   ├── routes/transfers.js     # VULN #5: IDOR
+│   ├── routes/users.js         # VULN #4: Missing auth
+│   ├── utils/auth.js           # FALSE POSITIVE #7: bcrypt (safe)
+│   ├── seed.js                 # Database seeder
+│   ├── server.js               # Express app
+│   └── package.json
+├── mcp-servers/
+│   └── github/                  # ✅ GitHub MCP Server (9 tools)
+│       ├── server.py
+│       ├── test_tools.py
+│       ├── pyproject.toml
+│       └── README.md
+├── agents/
+│   └── scanner/                 # 🔧 Scanner Agent (in progress)
+│       ├── config.py
+│       ├── prompts.py
+│       ├── github_client.py
+│       ├── llm_engine.py
+│       ├── scanner.py
+│       ├── smart_scan.py       # ⚠️ Bug fixed but untested
+│       ├── requirements.txt
+│       └── .env.example
+│   ├── analyzer/                # ❌ Not built
+│   ├── fixer/                   # ❌ Not built
+│   └── compliance/              # ❌ Not built
+├── docs/                        # Empty - architecture diagrams later
+├── reports/                     # Scanner output goes here
+├── .gitignore                   # Includes .env, __pycache__, *.db, Python
+└── PROJECT_STATUS.md            # ← THIS FILE
+```
+
+---
+
+## 🏗️ Build Priority Order
+
+1. ~~GitHub MCP Server~~ ✅
+2. ~~Scanner Agent~~ 🔧 (smart_scan needs retest)
+3. **Analyzer Agent** ← NEXT
+4. Fixer Agent
+5. Compliance Agent  
+6. Azure DevOps Pipeline (last - just trigger/glue)
+7. Demo Video
+
+---
+
+## 💡 Architecture Decisions
+
+1. **Python over TypeScript** for agents - Foundry SDK is Python-first
+2. **Azure DevOps Pipelines over GitHub Actions** - billing concerns ($5K incident), Azure integration points
+3. **gpt-4.1-mini for practice, o4-mini for final** - cost optimization
+4. **Smart scan strategy** for large repos: Context Map → Grouped Scan → Deduplicate
+5. **MCP Server as shared layer** - all agents use same GitHub MCP tools
+6. **Draft PRs always** - human-in-the-loop for compliance (regulators need to see human approval)
+
+---
+
+## 📝 Blueprint Document
+Full hackathon blueprint is at: `/mnt/project/DevSecOps_Guardian_Hackathon_Blueprint.docx`
+Contains: problem statement, architecture, demo flow, competitive analysis, build plan, costs.
+
+---
+
+*Last updated: February 17, 2026 ~4:00 PM EST*
