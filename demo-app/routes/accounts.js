@@ -7,8 +7,8 @@ const express = require('express');
 const router = express.Router();
 const { getDatabase } = require('../config/database');
 
-// VULNERABLE: SQL Injection - user input concatenated directly into query
-// GET /api/accounts?id=1 OR 1=1
+// FIXED: Use parameterized query to prevent SQL Injection
+// GET /api/accounts?id=1 OR 1=1 attack prevented by parameterization
 router.get('/', (req, res) => {
   const { id } = req.query;
   
@@ -19,12 +19,9 @@ router.get('/', (req, res) => {
   try {
     const db = getDatabase();
     
-    // VULNERABLE: String concatenation in SQL query
-    // An attacker can inject: ?id=1 OR 1=1 -- to dump all accounts
-    const query = `SELECT id, account_number, owner_name, balance, account_type 
-                   FROM accounts WHERE id = ${id}`;
-    
-    const accounts = db.prepare(query).all();
+    // Secure parameterized query to prevent SQL Injection
+    const query = 'SELECT id, account_number, owner_name, balance, account_type FROM accounts WHERE id = ?';
+    const accounts = db.prepare(query).all(id);
     
     if (accounts.length === 0) {
       return res.status(404).json({ error: 'Account not found' });
