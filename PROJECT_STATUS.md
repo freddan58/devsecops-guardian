@@ -99,12 +99,33 @@ A **multi-agent AI security pipeline** for banking applications. Four specialize
 | `llm_engine.py` | Calls Azure OpenAI for contextual analysis | ✅ |
 | `analyzer.py` | Main orchestrator + CLI | ✅ |
 
-### 5. Fixer Agent
-**Location**: `agents/fixer/` (empty)
+### 5. Fixer Agent (COMPLETE) ✅
+**Location**: `agents/fixer/`
 - Takes confirmed findings from Analyzer
-- For each finding: creates security/ branch, generates fix, creates draft PR
-- Human-in-the-loop: developer reviews and merges
+- For each finding: reads source file, generates LLM fix, creates security/ branch, commits fix, creates draft PR
+- Human-in-the-loop: developer reviews and merges (all PRs are drafts)
 - Uses GitHub MCP write tools (create_branch, create_or_update_file, create_pr)
+- **Last test**: 6/6 confirmed findings fixed, 6 draft PRs created (PRs #1-#6)
+- Supports `--dry-run` mode for testing without GitHub writes
+
+**Files:**
+| File | Purpose | Status |
+|------|---------|--------|
+| `config.py` | Configuration from .env | ✅ |
+| `prompts.py` | LLM system prompt + fix generation templates | ✅ |
+| `github_client.py` | Read + Write ops via GitHub MCP (branch, commit, PR) | ✅ |
+| `llm_engine.py` | Calls Azure OpenAI for fix code generation | ✅ |
+| `fixer.py` | Main orchestrator + CLI | ✅ |
+
+**Draft PRs Created:**
+| PR# | Finding | Branch |
+|-----|---------|--------|
+| #1 | SQL Injection (CWE-89) | `security/fix-sql-injection-accounts` |
+| #2 | XSS (CWE-79) | `security/fix-reflected-cross-site-scripting-xss-search` |
+| #3 | Hardcoded Secrets (CWE-798) | `security/fix-hardcoded-secrets-database` |
+| #4 | PII Logging (CWE-532) | `security/fix-information-exposure-in-logs-logger` |
+| #5 | IDOR (CWE-639) | `security/fix-missing-authorization-idor-transfers` |
+| #6 | Missing Auth (CWE-862) | `security/fix-missing-authentication-users` |
 
 ### 6. Compliance Agent
 **Location**: `agents/compliance/` (empty)
@@ -127,7 +148,7 @@ A **multi-agent AI security pipeline** for banking applications. Four specialize
 
 ### Azure OpenAI (Foundry)
 - **Endpoint**: `https://devsecops-guardian-hackaton-etec.services.ai.azure.com/`
-- **API Key**: In `agents/scanner/.env` and `agents/analyzer/.env` (DO NOT COMMIT)
+- **API Key**: In `agents/scanner/.env`, `agents/analyzer/.env`, `agents/fixer/.env` (DO NOT COMMIT)
 - **Project**: `devsecops-guardian-hackaton-etech`
 - **Deployed models**: `gpt-4.1-mini` (practice, cheap), `o4-mini` (final video, better quality)
 - **API Version**: `2024-12-01-preview`
@@ -140,8 +161,8 @@ A **multi-agent AI security pipeline** for banking applications. Four specialize
 ### Environment Files (.env) - ALL in .gitignore
 - `mcp-servers/github/.env` - GITHUB_TOKEN
 - `agents/scanner/.env` - AZURE_OPENAI_* + GITHUB_TOKEN
-- (future) `agents/analyzer/.env`
-- (future) `agents/fixer/.env`
+- `agents/analyzer/.env` - AZURE_OPENAI_* + GITHUB_TOKEN
+- `agents/fixer/.env` - AZURE_OPENAI_* + GITHUB_TOKEN
 - (future) `agents/compliance/.env`
 
 ### Key Dependencies
@@ -194,7 +215,14 @@ devsecops-guardian/
 │       ├── analyzer.py
 │       ├── requirements.txt
 │       └── .env.example
-│   ├── fixer/                   # ❌ Not built
+│   ├── fixer/                   # ✅ Fixer Agent
+│       ├── config.py
+│       ├── prompts.py
+│       ├── github_client.py
+│       ├── llm_engine.py
+│       ├── fixer.py
+│       ├── requirements.txt
+│       └── .env.example
 │   └── compliance/              # ❌ Not built
 ├── docs/                        # Empty - architecture diagrams later
 ├── reports/                     # Scanner output goes here
@@ -209,8 +237,8 @@ devsecops-guardian/
 1. ~~GitHub MCP Server~~ ✅
 2. ~~Scanner Agent~~ ✅
 3. ~~Analyzer Agent~~ ✅
-4. **Fixer Agent** <- NEXT
-5. Compliance Agent
+4. ~~Fixer Agent~~ ✅
+5. **Compliance Agent** <- NEXT
 6. Azure DevOps Pipeline (last - just trigger/glue)
 7. Demo Video
 
@@ -233,4 +261,4 @@ Contains: problem statement, architecture, demo flow, competitive analysis, buil
 
 ---
 
-*Last updated: February 17, 2026 ~5:00 PM EST*
+*Last updated: February 17, 2026 ~5:15 PM EST*

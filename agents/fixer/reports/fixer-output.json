@@ -1,0 +1,84 @@
+{
+  "agent_name": "DevSecOps Guardian - Fixer Agent",
+  "version": "1.0.0",
+  "timestamp": "2026-02-17T22:11:18.563513+00:00",
+  "repository": "freddan58/devsecops-guardian",
+  "analyzer_report": "C:\\Users\\furbano\\source\\repos\\devsecops-guardian\\agents\\fixer\\..\\analyzer\\reports\\analyzer-output.json",
+  "total_processed": 6,
+  "success_count": 6,
+  "failed_count": 0,
+  "fixes": [
+    {
+      "scan_id": "SCAN-001",
+      "anlz_id": "ANLZ-001",
+      "file": "demo-app/routes/accounts.js",
+      "vulnerability": "SQL Injection",
+      "status": "SUCCESS",
+      "fix_summary": "Fixed SQL Injection by using parameterized queries for user input in GET /api/accounts",
+      "branch": "security/fix-sql-injection-accounts",
+      "pr_number": 1,
+      "pr_url": "https://github.com/freddan58/devsecops-guardian/pull/1",
+      "error": ""
+    },
+    {
+      "scan_id": "SCAN-002",
+      "anlz_id": "ANLZ-002",
+      "file": "demo-app/routes/search.js",
+      "vulnerability": "Reflected Cross-Site Scripting (XSS)",
+      "status": "SUCCESS",
+      "fix_summary": "Escaped user input and database output in HTML response to prevent reflected XSS",
+      "branch": "security/fix-reflected-cross-site-scripting-xss-search",
+      "pr_number": 2,
+      "pr_url": "https://github.com/freddan58/devsecops-guardian/pull/2",
+      "error": ""
+    },
+    {
+      "scan_id": "SCAN-003",
+      "anlz_id": "ANLZ-003",
+      "file": "demo-app/config/database.js",
+      "vulnerability": "Hardcoded Secrets",
+      "status": "SUCCESS",
+      "fix_summary": "Replaced hardcoded secrets with environment variable references in DB_CONFIG",
+      "branch": "security/fix-hardcoded-secrets-database",
+      "pr_number": 3,
+      "pr_url": "https://github.com/freddan58/devsecops-guardian/pull/3",
+      "error": ""
+    },
+    {
+      "scan_id": "SCAN-004",
+      "anlz_id": "ANLZ-004",
+      "file": "demo-app/middleware/logger.js",
+      "vulnerability": "Information Exposure in Logs",
+      "status": "SUCCESS",
+      "fix_summary": "Redacted sensitive PII fields from logs in headers, request body, query params, and response body.",
+      "branch": "security/fix-information-exposure-in-logs-logger",
+      "pr_number": 4,
+      "pr_url": "https://github.com/freddan58/devsecops-guardian/pull/4",
+      "error": ""
+    },
+    {
+      "scan_id": "SCAN-005",
+      "anlz_id": "ANLZ-005",
+      "file": "demo-app/routes/transfers.js",
+      "vulnerability": "Missing Authorization / IDOR",
+      "status": "SUCCESS",
+      "fix_summary": "Added ownership check in GET /api/transfers/:id route to prevent unauthorized access to other users' transfers",
+      "branch": "security/fix-missing-authorization-idor-transfers",
+      "pr_number": 5,
+      "pr_url": "https://github.com/freddan58/devsecops-guardian/pull/5",
+      "error": ""
+    },
+    {
+      "scan_id": "SCAN-006",
+      "anlz_id": "ANLZ-006",
+      "file": "demo-app/routes/users.js",
+      "vulnerability": "Missing Authentication",
+      "status": "SUCCESS",
+      "fix_summary": "Added authenticateToken middleware and authorization check to DELETE /api/users/:id endpoint",
+      "branch": "security/fix-missing-authentication-users",
+      "pr_number": 6,
+      "pr_url": "https://github.com/freddan58/devsecops-guardian/pull/6",
+      "error": ""
+    }
+  ]
+}
