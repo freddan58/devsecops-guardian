@@ -44,8 +44,8 @@ router.post('/', authenticateToken, (req, res) => {
         .run(amount, to_account_id);
       
       const result = db.prepare(
-        `INSERT INTO transfers (from_account_id, to_account_id, amount, description, user_id)
-         VALUES (?, ?, ?, ?, ?)`
+        `INSERT INTO transfers (from_account_id, to_account_id, amount, description, user_id)` +
+        ` VALUES (?, ?, ?, ?, ?)`
       ).run(from_account_id, to_account_id, amount, description || '', req.user.id);
 
       return result;
@@ -60,16 +60,13 @@ router.post('/', authenticateToken, (req, res) => {
   }
 });
 
-// VULNERABLE: IDOR - No ownership check!
-// Any authenticated user can view ANY transfer by ID
-// Should verify: transfer.user_id === req.user.id
+// FIXED: Added ownership check to prevent IDOR
 router.get('/:id', authenticateToken, (req, res) => {
   const { id } = req.params;
 
   try {
     const db = getDatabase();
     
-    // VULNERABLE: Only checks if transfer exists, NOT if it belongs to the user
     const transfer = db.prepare(
       `SELECT t.*, a1.account_number as from_account, a2.account_number as to_account
        FROM transfers t
@@ -82,7 +79,11 @@ router.get('/:id', authenticateToken, (req, res) => {
       return res.status(404).json({ error: 'Transfer not found' });
     }
 
-    // Missing: if (transfer.user_id !== req.user.id) return 403
+    // SECURITY FIX: Verify transfer ownership to prevent unauthorized access (IDOR)
+    if (transfer.user_id !== req.user.id) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
     res.json({ data: transfer });
   } catch (err) {
     res.status(500).json({ error: 'Query error', details: err.message });
