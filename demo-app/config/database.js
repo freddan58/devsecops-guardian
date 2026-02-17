@@ -1,16 +1,16 @@
 // ============================================================
-// VULNERABILITY #3: Hardcoded API Key (CWE-798)
-// Secret credentials stored directly in source code
+// FIXED: Removed hardcoded API Key, DB secret, and encryption key
+// Secrets are now loaded from environment variables for security
 // ============================================================
 
 const Database = require('better-sqlite3');
 const path = require('path');
 
-// VULNERABLE: Hardcoded credentials in source code
+// FIX: Load secrets from environment variables to prevent exposure of hardcoded credentials
 const DB_CONFIG = {
-  API_KEY: 'sk-proj-abc123def456ghi789jkl012mno345pqr678stu901vwx234',
-  DB_SECRET: 'super_secret_database_password_2024',
-  ENCRYPTION_KEY: 'aes-256-key-do-not-share-1234567890abcdef'
+  API_KEY: process.env.API_KEY,
+  DB_SECRET: process.env.DB_SECRET,
+  ENCRYPTION_KEY: process.env.ENCRYPTION_KEY
 };
 
 const DB_PATH = path.join(__dirname, '..', 'banking.db');
