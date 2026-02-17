@@ -1,0 +1,215 @@
+{
+  "agent_name": "DevSecOps Guardian - Compliance Agent",
+  "version": "1.0.0",
+  "timestamp": "2026-02-17T22:28:23.490473+00:00",
+  "repository": "freddan58/devsecops-guardian",
+  "framework": "PCI-DSS 4.0",
+  "overall_risk_rating": "CRITICAL",
+  "compliant_count": 0,
+  "non_compliant_count": 3,
+  "executive_summary": "The security assessment of the freddan58/devsecops-guardian repository identified six confirmed vulnerabilities affecting critical areas of the banking application. All findings have associated fixes implemented and pending review, demonstrating proactive remediation efforts. Critical issues include SQL Injection and Missing Authentication on public endpoints, which pose significant risks to data confidentiality and system integrity. Medium and high severity issues such as Reflected XSS, Hardcoded Secrets, Information Exposure in Logs, and Missing Authorization (IDOR) were also identified and addressed. While remediation efforts are commendable, some requirements such as automated web attack prevention (WAF) and audit log access controls remain unaddressed. Overall, the application is in a state of partial compliance with PCI-DSS 4.0, with critical risks mitigated but requiring validation and additional controls to achieve full compliance.",
+  "findings": [
+    {
+      "scan_id": "SCAN-001",
+      "vulnerability": "SQL Injection",
+      "cwe": "CWE-89",
+      "severity": "CRITICAL",
+      "pci_dss_requirements": [
+        {
+          "requirement_id": "6.2.4",
+          "requirement_title": "Software engineering techniques prevent common vulnerabilities",
+          "relevance": "SQL Injection is a primary attack vector covered by Req 6.2.4",
+          "compliance_status": "PARTIALLY_COMPLIANT",
+          "evidence": "String concatenation used in SQL query at demo-app/routes/accounts.js:14",
+          "remediation_status": "FIX_PENDING_REVIEW",
+          "remediation_evidence": "Draft PR #1 replaces with parameterized query"
+        },
+        {
+          "requirement_id": "6.3.1",
+          "requirement_title": "Security vulnerabilities are identified and managed (CVE tracking)",
+          "relevance": "SQL Injection vulnerability identified and fixed promptly",
+          "compliance_status": "PARTIALLY_COMPLIANT",
+          "evidence": "Vulnerability detected and fixed with parameterized queries in PR #1",
+          "remediation_status": "FIX_PENDING_REVIEW",
+          "remediation_evidence": "Draft PR #1 replaces vulnerable code"
+        },
+        {
+          "requirement_id": "6.4.1",
+          "requirement_title": "Public-facing web apps protected against attacks",
+          "relevance": "SQL Injection affects public GET /api/accounts endpoint",
+          "compliance_status": "PARTIALLY_COMPLIANT",
+          "evidence": "No authentication middleware on GET /api/accounts; fix applied to prevent injection",
+          "remediation_status": "FIX_PENDING_REVIEW",
+          "remediation_evidence": "PR #1 applies parameterized queries"
+        }
+      ],
+      "risk_rating": "CRITICAL",
+      "risk_justification": "SQL Injection on public banking endpoint exposes all account data without authentication",
+      "regulatory_impact": "Potential data breach notification required under PCI-DSS 4.0 and state privacy laws"
+    },
+    {
+      "scan_id": "SCAN-002",
+      "vulnerability": "Reflected Cross-Site Scripting (XSS)",
+      "cwe": "CWE-79",
+      "severity": "MEDIUM",
+      "pci_dss_requirements": [
+        {
+          "requirement_id": "6.2.4",
+          "requirement_title": "Software engineering techniques prevent common vulnerabilities",
+          "relevance": "XSS is a common vulnerability addressed by secure coding practices in Req 6.2.4",
+          "compliance_status": "PARTIALLY_COMPLIANT",
+          "evidence": "User input reflected in HTML response without encoding at demo-app/routes/search.js:19",
+          "remediation_status": "FIX_PENDING_REVIEW",
+          "remediation_evidence": "PR #2 escapes user input and output to prevent XSS"
+        },
+        {
+          "requirement_id": "6.4.1",
+          "requirement_title": "Public-facing web apps protected against attacks",
+          "relevance": "Reflected XSS affects public GET /api/search endpoint",
+          "compliance_status": "PARTIALLY_COMPLIANT",
+          "evidence": "No authentication middleware on GET /api/search; fix applied to escape output",
+          "remediation_status": "FIX_PENDING_REVIEW",
+          "remediation_evidence": "PR #2 applies output encoding"
+        },
+        {
+          "requirement_id": "6.4.2",
+          "requirement_title": "Automated technical solution detects/prevents web attacks",
+          "relevance": "XSS vulnerability indicates need for automated detection/prevention",
+          "compliance_status": "NON_COMPLIANT",
+          "evidence": "No mention of WAF or automated detection/prevention for web attacks",
+          "remediation_status": "UNFIXED",
+          "remediation_evidence": "No fix or WAF implementation noted"
+        }
+      ],
+      "risk_rating": "MEDIUM",
+      "risk_justification": "Reflected XSS on public endpoint can lead to session hijacking or phishing",
+      "regulatory_impact": "May lead to compromise of user sessions and PCI data exposure"
+    },
+    {
+      "scan_id": "SCAN-003",
+      "vulnerability": "Hardcoded Secrets",
+      "cwe": "CWE-798",
+      "severity": "HIGH",
+      "pci_dss_requirements": [
+        {
+          "requirement_id": "8.6.2",
+          "requirement_title": "Passwords/passphrases for system/application accounts not hardcoded",
+          "relevance": "Hardcoded API keys and secrets violate Req 8.6.2",
+          "compliance_status": "PARTIALLY_COMPLIANT",
+          "evidence": "Hardcoded secrets in demo-app/config/database.js:8",
+          "remediation_status": "FIX_PENDING_REVIEW",
+          "remediation_evidence": "PR #3 replaces hardcoded secrets with environment variables"
+        },
+        {
+          "requirement_id": "8.3.2",
+          "requirement_title": "Strong cryptography used for authentication",
+          "relevance": "Hardcoded encryption keys risk weak cryptographic protection",
+          "compliance_status": "PARTIALLY_COMPLIANT",
+          "evidence": "Hardcoded ENCRYPTION_KEY in source code",
+          "remediation_status": "FIX_PENDING_REVIEW",
+          "remediation_evidence": "PR #3 replaces with secure environment variable usage"
+        }
+      ],
+      "risk_rating": "HIGH",
+      "risk_justification": "Exposure of hardcoded secrets can lead to unauthorized database and encryption access",
+      "regulatory_impact": "Compromise of cryptographic keys may lead to PCI data breach and non-compliance"
+    },
+    {
+      "scan_id": "SCAN-004",
+      "vulnerability": "Information Exposure in Logs",
+      "cwe": "CWE-532",
+      "severity": "HIGH",
+      "pci_dss_requirements": [
+        {
+          "requirement_id": "3.4.1",
+          "requirement_title": "PAN masked when displayed",
+          "relevance": "Sensitive PII including PAN exposed in logs without masking",
+          "compliance_status": "PARTIALLY_COMPLIANT",
+          "evidence": "Sensitive data logged in headers, request bodies, query params, and responses at demo-app/middleware/logger.js:9",
+          "remediation_status": "FIX_PENDING_REVIEW",
+          "remediation_evidence": "PR #4 redacts sensitive PII fields from logs"
+        },
+        {
+          "requirement_id": "10.3.1",
+          "requirement_title": "Read access to audit log files limited to those with job need",
+          "relevance": "Sensitive data in logs requires strict access controls",
+          "compliance_status": "NON_COMPLIANT",
+          "evidence": "No evidence of log access restrictions or protections",
+          "remediation_status": "UNFIXED",
+          "remediation_evidence": "No fix or access control implementation noted"
+        }
+      ],
+      "risk_rating": "HIGH",
+      "risk_justification": "Exposure of PII and PAN in logs risks data theft and regulatory violations",
+      "regulatory_impact": "Violation of PCI-DSS log protection requirements and potential data breach"
+    },
+    {
+      "scan_id": "SCAN-005",
+      "vulnerability": "Missing Authorization / IDOR",
+      "cwe": "CWE-639",
+      "severity": "HIGH",
+      "pci_dss_requirements": [
+        {
+          "requirement_id": "7.2.1",
+          "requirement_title": "Access control model defined with least privilege",
+          "relevance": "IDOR allows unauthorized access violating least privilege principle",
+          "compliance_status": "PARTIALLY_COMPLIANT",
+          "evidence": "No ownership check in GET /api/transfers/:id at demo-app/routes/transfers.js:53",
+          "remediation_status": "FIX_PENDING_REVIEW",
+          "remediation_evidence": "PR #5 adds ownership check to enforce least privilege"
+        },
+        {
+          "requirement_id": "7.2.2",
+          "requirement_title": "Access assigned based on job function and need-to-know",
+          "relevance": "Lack of ownership verification violates need-to-know access",
+          "compliance_status": "PARTIALLY_COMPLIANT",
+          "evidence": "Missing authorization check for transfer ownership",
+          "remediation_status": "FIX_PENDING_REVIEW",
+          "remediation_evidence": "PR #5 implements ownership verification"
+        }
+      ],
+      "risk_rating": "HIGH",
+      "risk_justification": "Unauthorized access to other users' transfers risks data confidentiality and fraud",
+      "regulatory_impact": "Non-compliance with access control requirements and potential data breach"
+    },
+    {
+      "scan_id": "SCAN-006",
+      "vulnerability": "Missing Authentication",
+      "cwe": "CWE-862",
+      "severity": "CRITICAL",
+      "pci_dss_requirements": [
+        {
+          "requirement_id": "7.2.1",
+          "requirement_title": "Access control model defined with least privilege",
+          "relevance": "Unauthenticated access violates access control policies",
+          "compliance_status": "PARTIALLY_COMPLIANT",
+          "evidence": "DELETE /api/users/:id lacks authentication middleware at demo-app/routes/users.js:49",
+          "remediation_status": "FIX_PENDING_REVIEW",
+          "remediation_evidence": "PR #6 adds authenticateToken middleware"
+        },
+        {
+          "requirement_id": "8.3.1",
+          "requirement_title": "All user access authenticated",
+          "relevance": "Missing authentication allows unauthenticated user to delete accounts",
+          "compliance_status": "PARTIALLY_COMPLIANT",
+          "evidence": "No authentication on DELETE /api/users/:id endpoint",
+          "remediation_status": "FIX_PENDING_REVIEW",
+          "remediation_evidence": "PR #6 adds authentication and authorization checks"
+        }
+      ],
+      "risk_rating": "CRITICAL",
+      "risk_justification": "Unauthenticated deletion of user accounts risks data integrity and availability",
+      "regulatory_impact": "Severe non-compliance with authentication requirements and potential data loss"
+    }
+  ],
+  "recommendations": [
+    "Validate and deploy all pending fixes from draft PRs to production after thorough security testing.",
+    "Implement a Web Application Firewall (WAF) or equivalent automated detection/prevention solution to protect public-facing web applications against attacks such as XSS.",
+    "Enforce strict access controls and monitoring on audit logs to restrict read and modification access to authorized personnel only.",
+    "Establish formal secure software development lifecycle processes including code reviews and vulnerability management aligned with PCI-DSS 6.2 and 6.3 requirements.",
+    "Conduct periodic user access reviews and enforce least privilege principles consistently across all system components.",
+    "Ensure all sensitive data including PAN and PII is masked or redacted in logs and displays per PCI-DSS 3.4 and 10.3 requirements.",
+    "Maintain separation of duties and environment segregation to prevent unauthorized access and data leakage.",
+    "Regularly train development and operations personnel on secure coding and PCI-DSS compliance requirements."
+  ]
+}

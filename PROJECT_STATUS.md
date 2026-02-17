@@ -127,12 +127,25 @@ A **multi-agent AI security pipeline** for banking applications. Four specialize
 | #5 | IDOR (CWE-639) | `security/fix-missing-authorization-idor-transfers` |
 | #6 | Missing Auth (CWE-862) | `security/fix-missing-authentication-users` |
 
-### 6. Compliance Agent
-**Location**: `agents/compliance/` (empty)
-- Takes full pipeline results (Scanner → Analyzer → Fixer)
-- Maps findings to PCI-DSS 4.0 controls (Req 6.2.4, 6.3.1, 8.3)
-- Generates Markdown/PDF report with evidence trail
+### 6. Compliance Agent (COMPLETE) ✅
+**Location**: `agents/compliance/`
+- Takes full pipeline results (Scanner -> Analyzer -> Fixer)
+- Maps each finding to ALL relevant PCI-DSS 4.0 controls (Req 6.2.4, 6.3.1, 6.4.1, 7.2.1, 8.3.1, 8.6.2, 3.4.1, 10.3.1)
+- Generates JSON + Markdown audit-ready reports with evidence trail
 - **KILLER DIFFERENTIATOR** - no competitor has this
+- **Last test**: 6 findings mapped to 15 PCI-DSS requirements, overall risk: CRITICAL
+
+**Files:**
+| File | Purpose | Status |
+|------|---------|--------|
+| `config.py` | Configuration + paths to all upstream agent outputs | ✅ |
+| `prompts.py` | PCI-DSS 4.0 reference + CWE mapping guide | ✅ |
+| `llm_engine.py` | Builds pipeline detail + calls Azure OpenAI | ✅ |
+| `compliance.py` | Main orchestrator + Markdown report generator | ✅ |
+
+**Output files:**
+- `reports/compliance-output.json` - structured assessment data
+- `reports/compliance-report.md` - audit-ready Markdown report
 
 ### 7. Azure DevOps Pipeline
 - Triggers the 4-agent pipeline on PR creation
@@ -223,7 +236,13 @@ devsecops-guardian/
 │       ├── fixer.py
 │       ├── requirements.txt
 │       └── .env.example
-│   └── compliance/              # ❌ Not built
+│   └── compliance/              # ✅ Compliance Agent
+│       ├── config.py
+│       ├── prompts.py
+│       ├── llm_engine.py
+│       ├── compliance.py
+│       ├── requirements.txt
+│       └── .env.example
 ├── docs/                        # Empty - architecture diagrams later
 ├── reports/                     # Scanner output goes here
 ├── .gitignore                   # Includes .env, __pycache__, *.db, Python
@@ -238,8 +257,8 @@ devsecops-guardian/
 2. ~~Scanner Agent~~ ✅
 3. ~~Analyzer Agent~~ ✅
 4. ~~Fixer Agent~~ ✅
-5. **Compliance Agent** <- NEXT
-6. Azure DevOps Pipeline (last - just trigger/glue)
+5. ~~Compliance Agent~~ ✅
+6. **Azure DevOps Pipeline** <- NEXT (just trigger/glue)
 7. Demo Video
 
 ---
@@ -261,4 +280,4 @@ Contains: problem statement, architecture, demo flow, competitive analysis, buil
 
 ---
 
-*Last updated: February 17, 2026 ~5:15 PM EST*
+*Last updated: February 17, 2026 ~5:30 PM EST*
