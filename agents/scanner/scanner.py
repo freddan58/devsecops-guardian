@@ -59,7 +59,7 @@ async def scan_directory(path: str, ref: str = None) -> list[dict]:
     file_data = await read_multiple_files(file_paths, ref)
     print(f"  Read {len(file_data)} files successfully\n")
 
-    # Step 3: Smart Scan with LLM (context map → grouped scan → deduplicate)
+    # Step 3: Smart Scan with LLM (context map -> grouped scan -> deduplicate)
     print(f"[3/3] Smart scanning with LLM...")
     findings = await smart_scan(file_data)
 
@@ -129,7 +129,7 @@ async def scan_files(file_paths: list[str], ref: str = None) -> list[dict]:
 def print_findings(findings: list[dict]):
     """Pretty-print findings to console."""
     if not findings:
-        print("\n  ✅ No vulnerabilities detected!")
+        print("\n  [OK] No vulnerabilities detected!")
         return
 
     print(f"\n{'='*60}")
@@ -139,10 +139,10 @@ def print_findings(findings: list[dict]):
     severity_order = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
     sorted_findings = sorted(findings, key=lambda f: severity_order.get(f.get("severity", "LOW"), 9))
 
-    severity_icons = {"CRITICAL": "🔴", "HIGH": "🟠", "MEDIUM": "🟡", "LOW": "🔵"}
+    severity_icons = {"CRITICAL": "[!!]", "HIGH": "[!]", "MEDIUM": "[~]", "LOW": "[.]"}
 
     for f in sorted_findings:
-        icon = severity_icons.get(f.get("severity", ""), "⚪")
+        icon = severity_icons.get(f.get("severity", ""), "[ ]")
         print(f"\n  {icon} [{f.get('severity', '?')}] {f.get('id', '?')}: {f.get('vulnerability', '?')}")
         print(f"     File: {f.get('file', '?')}:{f.get('line', '?')}")
         print(f"     CWE: {f.get('cwe', 'N/A')}")
@@ -180,7 +180,7 @@ def save_findings(findings: list[dict], output_path: str):
     with open(output_path, "w") as f:
         json.dump(report, f, indent=2)
 
-    print(f"\n  📄 Results saved to: {output_path}")
+    print(f"\n  [*] Results saved to: {output_path}")
 
 
 async def main():

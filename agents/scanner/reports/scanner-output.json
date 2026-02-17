@@ -1,7 +1,7 @@
 {
   "scanner": "DevSecOps Guardian - Scanner Agent",
   "version": "1.0.0",
-  "timestamp": "2026-02-17T21:28:58.441693+00:00",
+  "timestamp": "2026-02-17T21:47:16.348599+00:00",
   "repository": "freddan58/devsecops-guardian",
   "total_findings": 6,
   "findings": [
@@ -12,7 +12,7 @@
       "vulnerability": "SQL Injection",
       "cwe": "CWE-89",
       "severity": "CRITICAL",
-      "description": "User input from query parameter 'id' is concatenated directly into SQL query without parameterization on a public endpoint.",
+      "description": "User input from query parameter 'id' is concatenated directly into SQL query without parameterization, allowing attackers to inject arbitrary SQL.",
       "evidence": "const query = `SELECT id, account_number, owner_name, balance, account_type \n                   FROM accounts WHERE id = ${id}`;",
       "recommendation": "Use parameterized queries: db.prepare('SELECT id, account_number, owner_name, balance, account_type FROM accounts WHERE id = ?').all(id)"
     },
@@ -23,53 +23,53 @@
       "vulnerability": "Reflected Cross-Site Scripting (XSS)",
       "cwe": "CWE-79",
       "severity": "MEDIUM",
-      "description": "User input from query parameter 'q' is reflected directly in HTML response without encoding or sanitization, allowing injection of malicious scripts.",
+      "description": "User input from query parameter 'q' is reflected directly in HTML response without proper encoding or sanitization, enabling XSS attacks.",
       "evidence": "const html = `\n      <html>\n        <head><title>Search Results</title></head>\n        <body>\n          <h1>Search Results for: ${q}</h1>\n          <p>Found ${results.length} results</p>\n          <ul>\n            ${results.map(r => `<li>${r.owner_name} - ${r.account_type}</li>`).join('')}\n          </ul>\n        </body>\n      </html>\n    `;",
-      "recommendation": "Properly encode or sanitize user input before embedding in HTML. Use templating engines with automatic escaping or libraries like DOMPurify."
+      "recommendation": "Properly encode or sanitize user input before including it in HTML responses. Use templating engines with automatic escaping or libraries like DOMPurify."
     },
     {
       "id": "SCAN-003",
-      "file": "demo-app/routes/transfers.js",
-      "line": 51,
-      "vulnerability": "Missing Authorization / IDOR",
-      "cwe": "CWE-639",
-      "severity": "HIGH",
-      "description": "Authenticated users can access any transfer by ID without verifying ownership, allowing unauthorized data access.",
-      "evidence": "const transfer = db.prepare(\n      `SELECT t.*, a1.account_number as from_account, a2.account_number as to_account\n       FROM transfers t\n       JOIN accounts a1 ON t.from_account_id = a1.id\n       JOIN accounts a2 ON t.to_account_id = a2.id\n       WHERE t.id = ?`\n    ).get(id);",
-      "recommendation": "Add ownership check: verify that transfer.user_id === req.user.id before returning data. Return 403 if unauthorized."
-    },
-    {
-      "id": "SCAN-004",
-      "file": "demo-app/routes/users.js",
-      "line": 56,
-      "vulnerability": "Missing Authentication",
-      "cwe": "CWE-862",
-      "severity": "CRITICAL",
-      "description": "DELETE /api/users/:id endpoint is publicly accessible without authentication, allowing any unauthenticated user to delete any user account.",
-      "evidence": "router.delete('/:id', (req, res) => {\n  const { id } = req.params;\n\n  try {\n    const db = getDatabase();\n    const result = db.prepare('DELETE FROM users WHERE id = ?').run(id);\n\n    if (result.changes === 0) {\n      return res.status(404).json({ error: 'User not found' });\n    }\n\n    res.json({ message: `User ${id} deleted successfully` });\n  } catch (err) {\n    res.status(500).json({ error: 'Delete error', details: err.message });\n  }\n});",
-      "recommendation": "Protect this endpoint with authentication middleware (authenticateToken) and authorization checks to ensure only authorized users can delete accounts."
-    },
-    {
-      "id": "SCAN-005",
       "file": "demo-app/config/database.js",
-      "line": 7,
+      "line": 8,
       "vulnerability": "Hardcoded Secrets",
       "cwe": "CWE-798",
       "severity": "HIGH",
-      "description": "API keys and database secrets are hardcoded directly in source code, risking exposure if code is leaked or accessed.",
+      "description": "API key, database secret, and encryption key are hardcoded directly in source code, risking exposure and unauthorized access.",
       "evidence": "const DB_CONFIG = {\n  API_KEY: 'sk-proj-abc123def456ghi789jkl012mno345pqr678stu901vwx234',\n  DB_SECRET: 'super_secret_database_password_2024',\n  ENCRYPTION_KEY: 'aes-256-key-do-not-share-1234567890abcdef'\n};",
-      "recommendation": "Move secrets to environment variables or secure vaults. Do not store secrets in source code repositories."
+      "recommendation": "Move secrets to environment variables or secure vault solutions and do not commit them to source code repositories."
     },
     {
-      "id": "SCAN-006",
+      "id": "SCAN-004",
       "file": "demo-app/middleware/logger.js",
-      "line": 10,
+      "line": 9,
       "vulnerability": "Information Exposure in Logs",
       "cwe": "CWE-532",
       "severity": "HIGH",
-      "description": "Sensitive Personally Identifiable Information (PII) such as account numbers, SSN, and credit card numbers are logged in request headers, query parameters, request bodies, and responses.",
-      "evidence": "console.log(`[${timestamp}] Headers:`, JSON.stringify(req.headers));\nconsole.log(`[${timestamp}] Request Body:`, JSON.stringify(req.body));\nconsole.log(`[${timestamp}] Query Params:`, JSON.stringify(req.query));\nconsole.log(`[${timestamp}] Response [${res.statusCode}]:`, \n  typeof body === 'string' ? body.substring(0, 500) : body);",
-      "recommendation": "Avoid logging sensitive data. Mask or redact PII before logging. Implement log filtering and secure log storage."
+      "description": "Sensitive Personally Identifiable Information (PII) such as account numbers, SSNs, and credit card numbers are logged in request headers, bodies, query parameters, and response bodies.",
+      "evidence": "console.log(`[${timestamp}] Headers:`, JSON.stringify(req.headers));\nconsole.log(`[${timestamp}] Request Body:`, JSON.stringify(req.body));\nconsole.log(`[${timestamp}] Query Params:`, JSON.stringify(req.query));\nconsole.log(`[${timestamp}] Response [${res.statusCode}]:`, typeof body === 'string' ? body.substring(0, 500) : body);",
+      "recommendation": "Avoid logging sensitive data. Mask or redact PII before logging. Implement logging policies that exclude sensitive information."
+    },
+    {
+      "id": "SCAN-005",
+      "file": "demo-app/routes/transfers.js",
+      "line": 53,
+      "vulnerability": "Missing Authorization / IDOR",
+      "cwe": "CWE-639",
+      "severity": "HIGH",
+      "description": "Authenticated users can access transfer details by ID without verifying ownership, allowing unauthorized access to other users' transfers.",
+      "evidence": "const transfer = db.prepare(\n      `SELECT t.*, a1.account_number as from_account, a2.account_number as to_account\n       FROM transfers t\n       JOIN accounts a1 ON t.from_account_id = a1.id\n       JOIN accounts a2 ON t.to_account_id = a2.id\n       WHERE t.id = ?`\n    ).get(id);\n\n// Missing: if (transfer.user_id !== req.user.id) return 403",
+      "recommendation": "Add ownership check: verify that transfer.user_id matches req.user.id before returning transfer details."
+    },
+    {
+      "id": "SCAN-006",
+      "file": "demo-app/routes/users.js",
+      "line": 49,
+      "vulnerability": "Missing Authentication",
+      "cwe": "CWE-862",
+      "severity": "CRITICAL",
+      "description": "DELETE /api/users/:id endpoint lacks authentication middleware, allowing any unauthenticated user to delete any user account.",
+      "evidence": "router.delete('/:id', (req, res) => {\n  const { id } = req.params;\n\n  try {\n    const db = getDatabase();\n    const result = db.prepare('DELETE FROM users WHERE id = ?').run(id);\n\n    if (result.changes === 0) {\n      return res.status(404).json({ error: 'User not found' });\n    }\n\n    res.json({ message: `User ${id} deleted successfully` });\n  } catch (err) {\n    res.status(500).json({ error: 'Delete error', details: err.message });\n  }\n});",
+      "recommendation": "Protect this endpoint with authentication middleware (e.g., authenticateToken) and implement authorization checks to ensure only authorized users can delete accounts."
     }
   ]
 }
