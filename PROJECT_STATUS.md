@@ -147,10 +147,35 @@ A **multi-agent AI security pipeline** for banking applications. Four specialize
 - `reports/compliance-output.json` - structured assessment data
 - `reports/compliance-report.md` - audit-ready Markdown report
 
-### 7. Azure DevOps Pipeline
-- Triggers the 4-agent pipeline on PR creation
+### 7. Azure DevOps Pipeline (COMPLETE) ✅
+**Location**: `azure-pipelines.yml` + `run_pipeline.py`
+- Azure DevOps pipeline with 5 stages: Setup → Scanner → Analyzer → Fixer → Compliance
+- Triggers on PR creation/update against main branch (paths: `demo-app/**`)
+- Each agent runs in its own stage, reports passed as pipeline artifacts
+- Pipeline variables for secrets (AZURE_OPENAI_API_KEY, GITHUB_TOKEN)
 - NOT using GitHub Actions (billing concerns - previously charged $5K)
 - Azure Pipelines strengthens "Best Azure Integration" category
+- Local orchestrator: `python run_pipeline.py` for full pipeline execution
+
+**Files:**
+| File | Purpose | Status |
+|------|---------|--------|
+| `azure-pipelines.yml` | Azure DevOps pipeline definition (5 stages) | ✅ |
+| `run_pipeline.py` | Local pipeline orchestrator with CLI | ✅ |
+
+**Pipeline Stages:**
+| Stage | Agent | Artifact Published |
+|-------|-------|--------------------|
+| Setup | - | Python environment ready |
+| Scanner | Scanner Agent | `scanner-output` |
+| Analyzer | Analyzer Agent | `analyzer-output` |
+| Fixer | Fixer Agent | `fixer-output` |
+| Compliance | Compliance Agent | `compliance-reports` |
+
+**Azure DevOps Setup Required:**
+1. Create pipeline from `azure-pipelines.yml` in Azure DevOps
+2. Set pipeline variables: `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY` (secret), `GITHUB_TOKEN` (secret)
+3. Connect Azure DevOps to GitHub repo (service connection)
 
 ### 8. Demo Video (2 min)
 - Record the full pipeline: PR → Scanner → Analyzer → Fixer → Compliance Report
@@ -176,7 +201,7 @@ A **multi-agent AI security pipeline** for banking applications. Four specialize
 - `agents/scanner/.env` - AZURE_OPENAI_* + GITHUB_TOKEN
 - `agents/analyzer/.env` - AZURE_OPENAI_* + GITHUB_TOKEN
 - `agents/fixer/.env` - AZURE_OPENAI_* + GITHUB_TOKEN
-- (future) `agents/compliance/.env`
+- `agents/compliance/.env` - AZURE_OPENAI_* + GITHUB_TOKEN
 
 ### Key Dependencies
 - **Python 3.12** (installed on machine)
@@ -245,6 +270,8 @@ devsecops-guardian/
 │       └── .env.example
 ├── docs/                        # Empty - architecture diagrams later
 ├── reports/                     # Scanner output goes here
+├── azure-pipelines.yml          # ✅ Azure DevOps pipeline (5 stages)
+├── run_pipeline.py              # ✅ Local pipeline orchestrator
 ├── .gitignore                   # Includes .env, __pycache__, *.db, Python
 └── PROJECT_STATUS.md            # ← THIS FILE
 ```
@@ -258,8 +285,8 @@ devsecops-guardian/
 3. ~~Analyzer Agent~~ ✅
 4. ~~Fixer Agent~~ ✅
 5. ~~Compliance Agent~~ ✅
-6. **Azure DevOps Pipeline** <- NEXT (just trigger/glue)
-7. Demo Video
+6. ~~Azure DevOps Pipeline~~ ✅
+7. **Demo Video** <- NEXT
 
 ---
 
@@ -280,4 +307,4 @@ Contains: problem statement, architecture, demo flow, competitive analysis, buil
 
 ---
 
-*Last updated: February 17, 2026 ~5:30 PM EST*
+*Last updated: February 17, 2026 ~7:00 PM EST*

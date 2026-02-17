@@ -1,0 +1,292 @@
+# DevSecOps Guardian - Azure DevOps Pipeline
+# ============================================
+# Multi-agent AI security pipeline for banking applications.
+# Triggers on PR creation/update against main branch.
+#
+# Pipeline stages:
+#   1. Setup    - Install Python dependencies
+#   2. Scanner  - AI-powered code security scanner
+#   3. Analyzer - Contextual false-positive elimination
+#   4. Fixer    - Automated security fix generation (draft PRs)
+#   5. Compliance - PCI-DSS 4.0 audit report generation
+#
+# Required pipeline variables (set in Azure DevOps > Pipelines > Variables):
+#   AZURE_OPENAI_ENDPOINT   - Azure OpenAI (Foundry) endpoint URL
+#   AZURE_OPENAI_API_KEY    - Azure OpenAI API key (mark as secret)
+#   GITHUB_TOKEN            - GitHub PAT with Contents R/W + Pull Requests R/W (mark as secret)
+
+trigger:
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - demo-app/**
+
+pr:
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - demo-app/**
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  pythonVersion: '3.12'
+  AZURE_OPENAI_DEPLOYMENT: 'gpt-4.1-mini'
+  AZURE_OPENAI_API_VERSION: '2024-12-01-preview'
+  GITHUB_OWNER: 'freddan58'
+  GITHUB_REPO: 'devsecops-guardian'
+
+stages:
+  # ============================================================
+  # STAGE 1: Setup - Install dependencies for all agents
+  # ============================================================
+  - stage: Setup
+    displayName: 'Setup Environment'
+    jobs:
+      - job: InstallDeps
+        displayName: 'Install Python Dependencies'
+        steps:
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: '$(pythonVersion)'
+            displayName: 'Use Python $(pythonVersion)'
+
+          - script: |
+              python -m pip install --upgrade pip
+              pip install httpx>=0.27.0 python-dotenv>=1.0.0
+            displayName: 'Install shared dependencies'
+
+  # ============================================================
+  # STAGE 2: Scanner - AI-powered code security scanner
+  # ============================================================
+  - stage: Scanner
+    displayName: 'Agent 1: Scanner'
+    dependsOn: Setup
+    jobs:
+      - job: RunScanner
+        displayName: 'Run Security Scanner'
+        steps:
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: '$(pythonVersion)'
+
+          - script: pip install httpx>=0.27.0 python-dotenv>=1.0.0
+            displayName: 'Install dependencies'
+
+          - script: |
+              cd agents/scanner
+              cat > .env << 'ENVEOF'
+              AZURE_OPENAI_ENDPOINT=$(AZURE_OPENAI_ENDPOINT)
+              AZURE_OPENAI_API_KEY=$(AZURE_OPENAI_API_KEY)
+              AZURE_OPENAI_DEPLOYMENT=$(AZURE_OPENAI_DEPLOYMENT)
+              AZURE_OPENAI_API_VERSION=$(AZURE_OPENAI_API_VERSION)
+              GITHUB_TOKEN=$(GITHUB_TOKEN)
+              GITHUB_OWNER=$(GITHUB_OWNER)
+              GITHUB_REPO=$(GITHUB_REPO)
+              ENVEOF
+              python scanner.py --path demo-app
+            displayName: 'Run Scanner Agent'
+            env:
+              AZURE_OPENAI_ENDPOINT: $(AZURE_OPENAI_ENDPOINT)
+              AZURE_OPENAI_API_KEY: $(AZURE_OPENAI_API_KEY)
+              GITHUB_TOKEN: $(GITHUB_TOKEN)
+
+          - publish: agents/scanner/reports/scanner-output.json
+            artifact: scanner-output
+            displayName: 'Publish Scanner Report'
+
+  # ============================================================
+  # STAGE 3: Analyzer - Contextual false-positive elimination
+  # ============================================================
+  - stage: Analyzer
+    displayName: 'Agent 2: Analyzer'
+    dependsOn: Scanner
+    jobs:
+      - job: RunAnalyzer
+        displayName: 'Run Vulnerability Analyzer'
+        steps:
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: '$(pythonVersion)'
+
+          - script: pip install httpx>=0.27.0 python-dotenv>=1.0.0
+            displayName: 'Install dependencies'
+
+          - download: current
+            artifact: scanner-output
+            displayName: 'Download Scanner Report'
+
+          - script: |
+              cd agents/analyzer
+              cat > .env << 'ENVEOF'
+              AZURE_OPENAI_ENDPOINT=$(AZURE_OPENAI_ENDPOINT)
+              AZURE_OPENAI_API_KEY=$(AZURE_OPENAI_API_KEY)
+              AZURE_OPENAI_DEPLOYMENT=$(AZURE_OPENAI_DEPLOYMENT)
+              AZURE_OPENAI_API_VERSION=$(AZURE_OPENAI_API_VERSION)
+              GITHUB_TOKEN=$(GITHUB_TOKEN)
+              GITHUB_OWNER=$(GITHUB_OWNER)
+              GITHUB_REPO=$(GITHUB_REPO)
+              ENVEOF
+              python analyzer.py --input $(Pipeline.Workspace)/scanner-output/scanner-output.json
+            displayName: 'Run Analyzer Agent'
+            env:
+              AZURE_OPENAI_ENDPOINT: $(AZURE_OPENAI_ENDPOINT)
+              AZURE_OPENAI_API_KEY: $(AZURE_OPENAI_API_KEY)
+              GITHUB_TOKEN: $(GITHUB_TOKEN)
+
+          - publish: agents/analyzer/reports/analyzer-output.json
+            artifact: analyzer-output
+            displayName: 'Publish Analyzer Report'
+
+  # ============================================================
+  # STAGE 4: Fixer - Automated security fix generation
+  # ============================================================
+  - stage: Fixer
+    displayName: 'Agent 3: Fixer'
+    dependsOn: Analyzer
+    jobs:
+      - job: RunFixer
+        displayName: 'Generate Security Fixes'
+        steps:
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: '$(pythonVersion)'
+
+          - script: pip install httpx>=0.27.0 python-dotenv>=1.0.0
+            displayName: 'Install dependencies'
+
+          - download: current
+            artifact: analyzer-output
+            displayName: 'Download Analyzer Report'
+
+          - script: |
+              cd agents/fixer
+              cat > .env << 'ENVEOF'
+              AZURE_OPENAI_ENDPOINT=$(AZURE_OPENAI_ENDPOINT)
+              AZURE_OPENAI_API_KEY=$(AZURE_OPENAI_API_KEY)
+              AZURE_OPENAI_DEPLOYMENT=$(AZURE_OPENAI_DEPLOYMENT)
+              AZURE_OPENAI_API_VERSION=$(AZURE_OPENAI_API_VERSION)
+              GITHUB_TOKEN=$(GITHUB_TOKEN)
+              GITHUB_OWNER=$(GITHUB_OWNER)
+              GITHUB_REPO=$(GITHUB_REPO)
+              ENVEOF
+              python fixer.py --input $(Pipeline.Workspace)/analyzer-output/analyzer-output.json
+            displayName: 'Run Fixer Agent'
+            env:
+              AZURE_OPENAI_ENDPOINT: $(AZURE_OPENAI_ENDPOINT)
+              AZURE_OPENAI_API_KEY: $(AZURE_OPENAI_API_KEY)
+              GITHUB_TOKEN: $(GITHUB_TOKEN)
+
+          - publish: agents/fixer/reports/fixer-output.json
+            artifact: fixer-output
+            displayName: 'Publish Fixer Report'
+
+  # ============================================================
+  # STAGE 5: Compliance - PCI-DSS 4.0 audit report generation
+  # ============================================================
+  - stage: Compliance
+    displayName: 'Agent 4: Compliance'
+    dependsOn:
+      - Scanner
+      - Analyzer
+      - Fixer
+    jobs:
+      - job: RunCompliance
+        displayName: 'Generate PCI-DSS 4.0 Report'
+        steps:
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: '$(pythonVersion)'
+
+          - script: pip install httpx>=0.27.0 python-dotenv>=1.0.0
+            displayName: 'Install dependencies'
+
+          - download: current
+            artifact: scanner-output
+            displayName: 'Download Scanner Report'
+
+          - download: current
+            artifact: analyzer-output
+            displayName: 'Download Analyzer Report'
+
+          - download: current
+            artifact: fixer-output
+            displayName: 'Download Fixer Report'
+
+          - script: |
+              cd agents/compliance
+              cat > .env << 'ENVEOF'
+              AZURE_OPENAI_ENDPOINT=$(AZURE_OPENAI_ENDPOINT)
+              AZURE_OPENAI_API_KEY=$(AZURE_OPENAI_API_KEY)
+              AZURE_OPENAI_DEPLOYMENT=$(AZURE_OPENAI_DEPLOYMENT)
+              AZURE_OPENAI_API_VERSION=$(AZURE_OPENAI_API_VERSION)
+              GITHUB_TOKEN=$(GITHUB_TOKEN)
+              GITHUB_OWNER=$(GITHUB_OWNER)
+              GITHUB_REPO=$(GITHUB_REPO)
+              ENVEOF
+              python compliance.py \
+                --scanner $(Pipeline.Workspace)/scanner-output/scanner-output.json \
+                --analyzer $(Pipeline.Workspace)/analyzer-output/analyzer-output.json \
+                --fixer $(Pipeline.Workspace)/fixer-output/fixer-output.json
+            displayName: 'Run Compliance Agent'
+            env:
+              AZURE_OPENAI_ENDPOINT: $(AZURE_OPENAI_ENDPOINT)
+              AZURE_OPENAI_API_KEY: $(AZURE_OPENAI_API_KEY)
+              GITHUB_TOKEN: $(GITHUB_TOKEN)
+
+          - publish: agents/compliance/reports
+            artifact: compliance-reports
+            displayName: 'Publish Compliance Reports'
+
+  # ============================================================
+  # SUMMARY: Publish all reports as pipeline artifacts
+  # ============================================================
+  - stage: Summary
+    displayName: 'Pipeline Summary'
+    dependsOn:
+      - Compliance
+    condition: always()
+    jobs:
+      - job: PrintSummary
+        displayName: 'Print Results Summary'
+        steps:
+          - download: current
+            artifact: scanner-output
+            displayName: 'Download Scanner Report'
+            condition: succeededOrFailed()
+
+          - download: current
+            artifact: analyzer-output
+            displayName: 'Download Analyzer Report'
+            condition: succeededOrFailed()
+
+          - download: current
+            artifact: fixer-output
+            displayName: 'Download Fixer Report'
+            condition: succeededOrFailed()
+
+          - download: current
+            artifact: compliance-reports
+            displayName: 'Download Compliance Reports'
+            condition: succeededOrFailed()
+
+          - script: |
+              echo "========================================================"
+              echo "  DevSecOps Guardian - Pipeline Complete"
+              echo "========================================================"
+              echo ""
+              echo "  Artifacts published:"
+              echo "    - scanner-output     (Scanner findings)"
+              echo "    - analyzer-output    (Confirmed vulnerabilities)"
+              echo "    - fixer-output       (Fix results + draft PRs)"
+              echo "    - compliance-reports (PCI-DSS 4.0 assessment)"
+              echo ""
+              echo "  Review the compliance report in the Artifacts tab."
+              echo "  Review draft PRs on GitHub for security fixes."
+              echo "========================================================"
+            displayName: 'Print Summary'
