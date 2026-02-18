@@ -1,19 +1,35 @@
 # DevSecOps Guardian - Azure DevOps Pipeline
 # ============================================
 # Multi-agent AI security pipeline for banking applications.
-# Triggers on PR creation/update against main branch.
+#
+# TWO PIPELINES IN ONE:
+#   A) Security Scan Pipeline (agents) - Triggers on changes to demo-app/
+#   B) CI/CD Deploy Pipeline          - Triggers on changes to api/, dashboard/, agents/, mcp-servers/
 #
 # Pipeline stages:
-#   1. Setup    - Install Python dependencies
-#   2. Scanner  - AI-powered code security scanner
-#   3. Analyzer - Contextual false-positive elimination
-#   4. Fixer    - Automated security fix generation (draft PRs)
-#   5. Compliance - PCI-DSS 4.0 audit report generation
+#   1. Setup      - Install Python dependencies
+#   2. Scanner    - AI-powered code security scanner
+#   3. Analyzer   - Contextual false-positive elimination
+#   4. Fixer      - Automated security fix generation (draft PRs)
+#   5. RiskProfiler - OWASP Top 10 risk assessment
+#   6. Compliance - PCI-DSS 4.0 audit report generation
+#   7. Build      - Docker build + push to ACR
+#   8. Deploy     - Update Azure Container Apps
 #
-# Required pipeline variables (set in Azure DevOps > Pipelines > Variables):
-#   AZURE_OPENAI_ENDPOINT   - Azure OpenAI (Foundry) endpoint URL
-#   AZURE_OPENAI_API_KEY    - Azure OpenAI API key (mark as secret)
-#   GITHUB_TOKEN            - GitHub PAT with Contents R/W + Pull Requests R/W (mark as secret)
+# Required variable group: "devsecops-guardian-vars" (Azure DevOps > Pipelines > Library)
+#   AZURE_OPENAI_ENDPOINT     - Azure OpenAI (Foundry) endpoint URL
+#   AZURE_OPENAI_API_KEY      - Azure OpenAI API key (mark as secret)
+#   GITHUB_TOKEN              - GitHub PAT with Contents R/W + Pull Requests R/W (mark as secret)
+#   ACR_LOGIN_SERVER          - ACR login server (e.g. acrdevsecopsguardian-xxx.azurecr.io)
+#   RESOURCE_GROUP            - Azure resource group name
+#   API_APP_NAME              - Container App name for API
+#   DASHBOARD_APP_NAME        - Container App name for Dashboard
+#   API_URL                   - Full HTTPS URL of the API gateway
+#   DASHBOARD_URL             - Full HTTPS URL of the dashboard
+#
+# Required service connections:
+#   acr-devsecops-guardian    - Docker Registry (ACR) service connection
+#   azure-devsecops-guardian  - Azure Resource Manager service connection
 
 trigger:
   branches:
@@ -22,24 +38,35 @@ trigger:
   paths:
     include:
       - demo-app/**
+      - agents/**
+      - mcp-servers/**
+      - api/**
+      - dashboard/**
 
 pr:
   branches:
     include:
       - main
-  paths:
-    include:
-      - demo-app/**
 
 pool:
   vmImage: 'ubuntu-latest'
 
 variables:
-  pythonVersion: '3.12'
-  AZURE_OPENAI_DEPLOYMENT: 'gpt-4.1-mini'
-  AZURE_OPENAI_API_VERSION: '2024-12-01-preview'
-  GITHUB_OWNER: 'freddan58'
-  GITHUB_REPO: 'devsecops-guardian'
+  - group: devsecops-guardian-vars
+  - name: pythonVersion
+    value: '3.12'
+  - name: nodeVersion
+    value: '20'
+  - name: AZURE_OPENAI_DEPLOYMENT
+    value: 'gpt-4.1-mini'
+  - name: AZURE_OPENAI_API_VERSION
+    value: '2024-12-01-preview'
+  - name: GITHUB_OWNER
+    value: 'freddan58'
+  - name: GITHUB_REPO
+    value: 'devsecops-guardian'
+  - name: imageTag
+    value: '$(Build.BuildId)'
 
 stages:
   # ============================================================
@@ -58,7 +85,7 @@ stages:
 
           - script: |
               python -m pip install --upgrade pip
-              pip install httpx>=0.27.0 python-dotenv>=1.0.0
+              pip install httpx>=0.27.0 python-dotenv>=1.0.0 "mcp[cli]>=1.0.0"
             displayName: 'Install shared dependencies'
 
   # ============================================================
@@ -67,6 +94,12 @@ stages:
   - stage: Scanner
     displayName: 'Agent 1: Scanner'
     dependsOn: Setup
+    condition: |
+      or(
+        contains(variables['Build.SourceVersionMessage'], '[scan]'),
+        eq(variables['Build.Reason'], 'Manual'),
+        contains(join(',', variables['Build.SourcesDirectory']), 'demo-app')
+      )
     jobs:
       - job: RunScanner
         displayName: 'Run Security Scanner'
@@ -75,7 +108,7 @@ stages:
             inputs:
               versionSpec: '$(pythonVersion)'
 
-          - script: pip install httpx>=0.27.0 python-dotenv>=1.0.0
+          - script: pip install httpx>=0.27.0 python-dotenv>=1.0.0 "mcp[cli]>=1.0.0"
             displayName: 'Install dependencies'
 
           - script: |
@@ -106,6 +139,7 @@ stages:
   - stage: Analyzer
     displayName: 'Agent 2: Analyzer'
     dependsOn: Scanner
+    condition: succeeded('Scanner')
     jobs:
       - job: RunAnalyzer
         displayName: 'Run Vulnerability Analyzer'
@@ -114,7 +148,7 @@ stages:
             inputs:
               versionSpec: '$(pythonVersion)'
 
-          - script: pip install httpx>=0.27.0 python-dotenv>=1.0.0
+          - script: pip install httpx>=0.27.0 python-dotenv>=1.0.0 "mcp[cli]>=1.0.0"
             displayName: 'Install dependencies'
 
           - download: current
@@ -149,6 +183,7 @@ stages:
   - stage: Fixer
     displayName: 'Agent 3: Fixer'
     dependsOn: Analyzer
+    condition: succeeded('Analyzer')
     jobs:
       - job: RunFixer
         displayName: 'Generate Security Fixes'
@@ -157,7 +192,7 @@ stages:
             inputs:
               versionSpec: '$(pythonVersion)'
 
-          - script: pip install httpx>=0.27.0 python-dotenv>=1.0.0
+          - script: pip install httpx>=0.27.0 python-dotenv>=1.0.0 "mcp[cli]>=1.0.0"
             displayName: 'Install dependencies'
 
           - download: current
@@ -187,14 +222,69 @@ stages:
             displayName: 'Publish Fixer Report'
 
   # ============================================================
-  # STAGE 5: Compliance - PCI-DSS 4.0 audit report generation
+  # STAGE 5: Risk Profiler - OWASP Top 10 risk assessment
   # ============================================================
-  - stage: Compliance
-    displayName: 'Agent 4: Compliance'
+  - stage: RiskProfiler
+    displayName: 'Agent 4: Risk Profiler'
     dependsOn:
       - Scanner
       - Analyzer
       - Fixer
+    condition: succeeded('Fixer')
+    jobs:
+      - job: RunRiskProfiler
+        displayName: 'Generate Risk Profile'
+        steps:
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: '$(pythonVersion)'
+
+          - script: pip install httpx>=0.27.0 python-dotenv>=1.0.0 "mcp[cli]>=1.0.0"
+            displayName: 'Install dependencies'
+
+          - download: current
+            artifact: scanner-output
+          - download: current
+            artifact: analyzer-output
+          - download: current
+            artifact: fixer-output
+
+          - script: |
+              cd agents/risk-profiler
+              cat > .env << 'ENVEOF'
+              AZURE_OPENAI_ENDPOINT=$(AZURE_OPENAI_ENDPOINT)
+              AZURE_OPENAI_API_KEY=$(AZURE_OPENAI_API_KEY)
+              AZURE_OPENAI_DEPLOYMENT=$(AZURE_OPENAI_DEPLOYMENT)
+              AZURE_OPENAI_API_VERSION=$(AZURE_OPENAI_API_VERSION)
+              GITHUB_TOKEN=$(GITHUB_TOKEN)
+              GITHUB_OWNER=$(GITHUB_OWNER)
+              GITHUB_REPO=$(GITHUB_REPO)
+              ENVEOF
+              python risk_profiler.py \
+                --scanner $(Pipeline.Workspace)/scanner-output/scanner-output.json \
+                --analyzer $(Pipeline.Workspace)/analyzer-output/analyzer-output.json \
+                --fixer $(Pipeline.Workspace)/fixer-output/fixer-output.json
+            displayName: 'Run Risk Profiler Agent'
+            env:
+              AZURE_OPENAI_ENDPOINT: $(AZURE_OPENAI_ENDPOINT)
+              AZURE_OPENAI_API_KEY: $(AZURE_OPENAI_API_KEY)
+              GITHUB_TOKEN: $(GITHUB_TOKEN)
+
+          - publish: agents/risk-profiler/reports
+            artifact: risk-profiler-output
+            displayName: 'Publish Risk Profile Report'
+
+  # ============================================================
+  # STAGE 6: Compliance - PCI-DSS 4.0 audit report generation
+  # ============================================================
+  - stage: Compliance
+    displayName: 'Agent 5: Compliance'
+    dependsOn:
+      - Scanner
+      - Analyzer
+      - Fixer
+      - RiskProfiler
+    condition: succeeded('RiskProfiler')
     jobs:
       - job: RunCompliance
         displayName: 'Generate PCI-DSS 4.0 Report'
@@ -203,20 +293,15 @@ stages:
             inputs:
               versionSpec: '$(pythonVersion)'
 
-          - script: pip install httpx>=0.27.0 python-dotenv>=1.0.0
+          - script: pip install httpx>=0.27.0 python-dotenv>=1.0.0 "mcp[cli]>=1.0.0"
             displayName: 'Install dependencies'
 
           - download: current
             artifact: scanner-output
-            displayName: 'Download Scanner Report'
-
           - download: current
             artifact: analyzer-output
-            displayName: 'Download Analyzer Report'
-
           - download: current
             artifact: fixer-output
-            displayName: 'Download Fixer Report'
 
           - script: |
               cd agents/compliance
@@ -244,12 +329,103 @@ stages:
             displayName: 'Publish Compliance Reports'
 
   # ============================================================
-  # SUMMARY: Publish all reports as pipeline artifacts
+  # STAGE 7: Build - Docker build + push to ACR
+  # ============================================================
+  - stage: Build
+    displayName: 'Build & Push Docker Images'
+    dependsOn: []
+    condition: |
+      and(
+        succeeded(),
+        eq(variables['Build.SourceBranch'], 'refs/heads/main')
+      )
+    jobs:
+      - job: BuildAPI
+        displayName: 'Build API Gateway Image'
+        steps:
+          - task: Docker@2
+            displayName: 'Build & Push API Gateway'
+            inputs:
+              containerRegistry: 'acr-devsecops-guardian'
+              repository: 'api-gateway'
+              command: 'buildAndPush'
+              Dockerfile: 'api/Dockerfile'
+              buildContext: '.'
+              tags: |
+                $(imageTag)
+                latest
+
+      - job: BuildDashboard
+        displayName: 'Build Dashboard Image'
+        steps:
+          - task: Docker@2
+            displayName: 'Build & Push Dashboard'
+            inputs:
+              containerRegistry: 'acr-devsecops-guardian'
+              repository: 'dashboard'
+              command: 'buildAndPush'
+              Dockerfile: 'dashboard/Dockerfile'
+              buildContext: 'dashboard'
+              tags: |
+                $(imageTag)
+                latest
+              arguments: '--build-arg NEXT_PUBLIC_API_URL=$(API_URL)'
+
+  # ============================================================
+  # STAGE 8: Deploy - Update Azure Container Apps
+  # ============================================================
+  - stage: Deploy
+    displayName: 'Deploy to Azure Container Apps'
+    dependsOn: Build
+    condition: succeeded('Build')
+    jobs:
+      - deployment: DeployAPI
+        displayName: 'Deploy API Gateway'
+        environment: 'production'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - task: AzureCLI@2
+                  displayName: 'Update API Container App'
+                  inputs:
+                    azureSubscription: 'azure-devsecops-guardian'
+                    scriptType: 'bash'
+                    scriptLocation: 'inlineScript'
+                    inlineScript: |
+                      az containerapp update \
+                        --name $(API_APP_NAME) \
+                        --resource-group $(RESOURCE_GROUP) \
+                        --image $(ACR_LOGIN_SERVER)/api-gateway:$(imageTag)
+
+      - deployment: DeployDashboard
+        displayName: 'Deploy Dashboard'
+        dependsOn: DeployAPI
+        environment: 'production'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - task: AzureCLI@2
+                  displayName: 'Update Dashboard Container App'
+                  inputs:
+                    azureSubscription: 'azure-devsecops-guardian'
+                    scriptType: 'bash'
+                    scriptLocation: 'inlineScript'
+                    inlineScript: |
+                      az containerapp update \
+                        --name $(DASHBOARD_APP_NAME) \
+                        --resource-group $(RESOURCE_GROUP) \
+                        --image $(ACR_LOGIN_SERVER)/dashboard:$(imageTag)
+
+  # ============================================================
+  # SUMMARY: Pipeline results
   # ============================================================
   - stage: Summary
     displayName: 'Pipeline Summary'
     dependsOn:
       - Compliance
+      - Deploy
     condition: always()
     jobs:
       - job: PrintSummary
@@ -271,6 +447,11 @@ stages:
             condition: succeededOrFailed()
 
           - download: current
+            artifact: risk-profiler-output
+            displayName: 'Download Risk Profile Report'
+            condition: succeededOrFailed()
+
+          - download: current
             artifact: compliance-reports
             displayName: 'Download Compliance Reports'
             condition: succeededOrFailed()
@@ -280,13 +461,18 @@ stages:
               echo "  DevSecOps Guardian - Pipeline Complete"
               echo "========================================================"
               echo ""
-              echo "  Artifacts published:"
-              echo "    - scanner-output     (Scanner findings)"
-              echo "    - analyzer-output    (Confirmed vulnerabilities)"
-              echo "    - fixer-output       (Fix results + draft PRs)"
-              echo "    - compliance-reports (PCI-DSS 4.0 assessment)"
+              echo "  Security Pipeline Artifacts:"
+              echo "    - scanner-output       (AI-detected vulnerabilities)"
+              echo "    - analyzer-output      (Confirmed w/ exploitability scores)"
+              echo "    - fixer-output         (Auto-generated fix PRs)"
+              echo "    - risk-profiler-output (OWASP Top 10 risk assessment)"
+              echo "    - compliance-reports   (PCI-DSS 4.0 audit report)"
               echo ""
-              echo "  Review the compliance report in the Artifacts tab."
+              echo "  Deployment:"
+              echo "    - API:       $(API_URL)/api/health"
+              echo "    - Dashboard: $(DASHBOARD_URL)"
+              echo ""
               echo "  Review draft PRs on GitHub for security fixes."
+              echo "  Review compliance report in the Artifacts tab."
               echo "========================================================"
             displayName: 'Print Summary'

@@ -15,7 +15,7 @@
 | 1 | Public GitHub repo with source code | Done |
 | 2 | Demo video < 2 min (YouTube/Vimeo public URL) | PENDING |
 | 3 | Project pitch/description (what, which Azure tech, what problem) | PENDING |
-| 4 | Working demo link for judges to test | PENDING |
+| 4 | Working demo link for judges to test | DONE |
 | 5 | All materials in English | Done |
 
 ### Judging Criteria (each 20%)
@@ -94,23 +94,34 @@ An **enterprise-grade multi-agent AI security platform** for banking and regulat
                     +------------------------------+
 ```
 
-### Deployment Architecture (Azure Container Apps)
+### Live Deployment (Azure Container Apps)
 ```
-Azure Container Apps Environment
-├── dashboard-app          # Next.js frontend (port 3000)
-├── api-gateway            # FastAPI backend (port 8000)
-├── scanner-agent          # Python agent (internal)
-├── analyzer-agent         # Python agent (internal)
-├── fixer-agent            # Python agent (internal)
-├── risk-profiler-agent    # Python agent (internal)
-└── compliance-agent       # Python agent (internal)
+Azure Container Apps Environment: cae-devsecops-guardian (East US)
+├── ca-api-gateway         # FastAPI backend (port 8000) - LIVE
+│   URL: https://ca-api-gateway.agreeablesand-6566841b.eastus.azurecontainerapps.io
+│   Health: /api/health → 200 OK (5 agents available)
+│
+├── ca-dashboard           # Next.js frontend (port 3000) - LIVE
+│   URL: https://ca-dashboard.agreeablesand-6566841b.eastus.azurecontainerapps.io
+│
+└── Agents run as subprocesses inside api-gateway container
 
 Azure Services
-├── Azure OpenAI (Foundry) # LLM inference
-├── Azure Key Vault        # Secrets (API keys, tokens)
-├── Azure Container Registry # Docker images
-└── Azure DevOps Pipelines # CI/CD trigger
+├── Azure OpenAI (Foundry) # LLM inference (gpt-4.1-mini / o4-mini)
+├── Azure Container Registry (acrdevsecopsguardian-dfhshegnfycwhzbe.azurecr.io)
+├── Azure DevOps Pipelines # CI/CD (devsecops-guardian-vars variable group)
+└── Log Analytics Workspace (law-devsecops-guardian)
 ```
+
+### Azure Resources
+| Resource | Name | Type |
+|----------|------|------|
+| Resource Group | rg-devsecops-guardian | Microsoft.Resources |
+| Container Registry | acrdevsecopsguardian | Microsoft.ContainerRegistry |
+| Log Analytics | law-devsecops-guardian | Microsoft.OperationalInsights |
+| Container Apps Env | cae-devsecops-guardian | Microsoft.App |
+| API Container App | ca-api-gateway | Microsoft.App |
+| Dashboard Container App | ca-dashboard | Microsoft.App |
 
 ---
 
@@ -220,7 +231,7 @@ Azure Services
 | **7** | ~~API Gateway (FastAPI)~~ | DONE | High | - |
 | **8** | ~~Dashboard (Next.js)~~ | DONE | Very High (20% UX) | - |
 | **9** | ~~Risk Profiler Agent~~ | DONE | Medium (innovation) | - |
-| **10** | **Container Apps Deploy** | PENDING | High (Azure Integration) | ~3h |
+| **10** | ~~Container Apps Deploy~~ | DONE | High (Azure Integration) | - |
 | **11** | **README** | PENDING | High (first impression) | ~1h |
 | **12** | **Demo Video** | PENDING | Critical (required) | ~2h |
 
@@ -298,11 +309,11 @@ devsecops-guardian/
 │   ├── package.json
 │   └── Dockerfile
 │
-├── infra/                       # Azure deployment (PENDING)
-│   ├── main.bicep               # Azure Container Apps infra
-│   └── deploy.sh                # Deployment script
+├── infra/                       # Azure deployment (DONE)
+│   ├── deploy.ps1               # PowerShell deployment script (in .gitignore - has secrets)
+│   └── AZURE_RESOURCES.md       # Azure resource documentation
 │
-├── azure-pipelines.yml          # Azure DevOps pipeline (5 stages)
+├── azure-pipelines.yml          # Azure DevOps pipeline (8 stages: agents + CI/CD)
 ├── run_pipeline.py              # Local pipeline orchestrator
 ├── .gitignore
 ├── README.md                    # Professional README (PENDING)
@@ -333,4 +344,4 @@ Contains: problem statement, architecture, demo flow, competitive analysis, buil
 
 ---
 
-*Last updated: February 17, 2026 ~11:30 PM EST*
+*Last updated: February 18, 2026*

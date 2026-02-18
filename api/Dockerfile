@@ -16,6 +16,10 @@ RUN pip install --no-cache-dir \
     -r /tmp/compliance-reqs.txt \
     -r /tmp/risk-profiler-reqs.txt
 
+# Install MCP server dependencies (required by github_client.py → server.py)
+COPY mcp-servers/github/pyproject.toml /tmp/mcp-server/pyproject.toml
+RUN pip install --no-cache-dir "mcp[cli]>=1.0.0"
+
 # Install API dependencies
 COPY api/requirements.txt /tmp/api-reqs.txt
 RUN pip install --no-cache-dir -r /tmp/api-reqs.txt

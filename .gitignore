@@ -166,3 +166,6 @@ dashboard/.env.local
 
 # Next.js
 dashboard/.next/
+
+# Infrastructure secrets (deploy script has API keys)
+infra/deploy.ps1
