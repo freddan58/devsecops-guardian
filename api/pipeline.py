@@ -1,0 +1,217 @@
+"""
+DevSecOps Guardian - Async Pipeline Runner
+
+Runs agents as async subprocesses, same pattern as run_pipeline.py
+but adapted for FastAPI BackgroundTasks.
+"""
+
+import asyncio
+import os
+import sys
+
+from config import (
+    AGENTS_DIR,
+    REPORTS_DIR,
+    SCANNER_DIR,
+    ANALYZER_DIR,
+    FIXER_DIR,
+    RISK_PROFILER_DIR,
+    COMPLIANCE_DIR,
+    PIPELINE_TIMEOUT,
+)
+from models import ScanRecord, ScanStore, scan_store
+from schemas import ScanStatus
+
+
+async def run_agent(
+    agent_name: str,
+    agent_dir: str,
+    script: str,
+    args: list[str],
+    timeout: int = PIPELINE_TIMEOUT,
+) -> tuple[int, str]:
+    """Run a single agent as an async subprocess.
+
+    Returns:
+        Tuple of (return_code, stderr_output).
+    """
+    cmd = [sys.executable, script] + args
+    print(f"  [>] Running {agent_name}: {' '.join(cmd)}")
+    print(f"  [>] Working dir: {agent_dir}")
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            cwd=agent_dir,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(
+            proc.communicate(), timeout=timeout
+        )
+
+        # Print stdout for visibility
+        if stdout:
+            for line in stdout.decode("utf-8", errors="replace").splitlines():
+                print(f"  [{agent_name}] {line}")
+
+        stderr_text = stderr.decode("utf-8", errors="replace") if stderr else ""
+        if stderr_text:
+            for line in stderr_text.splitlines():
+                print(f"  [{agent_name} ERR] {line}")
+
+        return proc.returncode or 0, stderr_text
+
+    except asyncio.TimeoutError:
+        print(f"  [!!] {agent_name} timed out after {timeout}s")
+        return -1, f"Agent timed out after {timeout} seconds"
+    except Exception as e:
+        print(f"  [!!] {agent_name} error: {e}")
+        return -1, str(e)
+
+
+async def run_pipeline(scan: ScanRecord):
+    """Execute the full agent pipeline for a scan.
+
+    Pipeline stages:
+        1. Scanner  - Detect vulnerabilities
+        2. Analyzer - Eliminate false positives
+        3. Fixer    - Generate fix PRs
+        4. Risk Profiler - OWASP risk scoring
+        5. Compliance    - PCI-DSS 4.0 mapping
+    """
+    scan_dir = os.path.join(REPORTS_DIR, scan.id)
+    os.makedirs(scan_dir, exist_ok=True)
+
+    # Output file paths per agent
+    scanner_out = os.path.join(scan_dir, "scanner-output.json")
+    analyzer_out = os.path.join(scan_dir, "analyzer-output.json")
+    fixer_out = os.path.join(scan_dir, "fixer-output.json")
+    risk_out = os.path.join(scan_dir, "risk-profile-output.json")
+    compliance_json = os.path.join(scan_dir, "compliance-output.json")
+    compliance_md = os.path.join(scan_dir, "compliance-report.md")
+
+    print(f"\n{'='*60}")
+    print(f"  Pipeline started: {scan.id}")
+    print(f"  Repository: {scan.repository_path}")
+    print(f"  Reports dir: {scan_dir}")
+    print(f"{'='*60}\n")
+
+    # ---- STAGE 1: SCANNER ----
+    scan.update_status(ScanStatus.SCANNING, "scanner")
+    scan.set_stage("scanner", "running")
+
+    scanner_args = ["--path", scan.repository_path, "--output", scanner_out]
+    if scan.ref:
+        scanner_args.extend(["--ref", scan.ref])
+
+    rc, err = await run_agent("scanner", SCANNER_DIR, "scanner.py", scanner_args)
+    if rc != 0:
+        scan.set_stage("scanner", "failed")
+        scan.set_error(f"Scanner failed: {err}")
+        return
+    scan.set_stage("scanner", "completed")
+    scan.load_output("scanner", scanner_out)
+
+    if not os.path.exists(scanner_out):
+        scan.set_error("Scanner output file not found")
+        return
+
+    # ---- STAGE 2: ANALYZER ----
+    scan.update_status(ScanStatus.ANALYZING, "analyzer")
+    scan.set_stage("analyzer", "running")
+
+    analyzer_args = ["--input", scanner_out, "--output", analyzer_out]
+    if scan.ref:
+        analyzer_args.extend(["--ref", scan.ref])
+
+    rc, err = await run_agent("analyzer", ANALYZER_DIR, "analyzer.py", analyzer_args)
+    if rc != 0:
+        scan.set_stage("analyzer", "failed")
+        scan.set_error(f"Analyzer failed: {err}")
+        return
+    scan.set_stage("analyzer", "completed")
+    scan.load_output("analyzer", analyzer_out)
+
+    if not os.path.exists(analyzer_out):
+        scan.set_error("Analyzer output file not found")
+        return
+
+    # ---- STAGE 3: FIXER ----
+    scan.update_status(ScanStatus.FIXING, "fixer")
+    scan.set_stage("fixer", "running")
+
+    fixer_args = ["--input", analyzer_out, "--output", fixer_out]
+    if scan.ref:
+        fixer_args.extend(["--ref", scan.ref])
+    if scan.dry_run:
+        fixer_args.append("--dry-run")
+
+    rc, err = await run_agent("fixer", FIXER_DIR, "fixer.py", fixer_args)
+    if rc != 0:
+        scan.set_stage("fixer", "failed")
+        # Fixer failure is non-blocking
+        print(f"  [!] Fixer failed (non-blocking): {err}")
+    else:
+        scan.set_stage("fixer", "completed")
+        scan.load_output("fixer", fixer_out)
+
+    # ---- STAGE 4: RISK PROFILER ----
+    if os.path.exists(RISK_PROFILER_DIR):
+        scan.update_status(ScanStatus.PROFILING, "risk-profiler")
+        scan.set_stage("risk-profiler", "running")
+
+        risk_args = [
+            "--scanner", scanner_out,
+            "--analyzer", analyzer_out,
+            "--output", risk_out,
+        ]
+        if os.path.exists(fixer_out):
+            risk_args.extend(["--fixer", fixer_out])
+
+        rc, err = await run_agent(
+            "risk-profiler", RISK_PROFILER_DIR, "risk_profiler.py", risk_args
+        )
+        if rc != 0:
+            scan.set_stage("risk-profiler", "failed")
+            print(f"  [!] Risk Profiler failed (non-blocking): {err}")
+        else:
+            scan.set_stage("risk-profiler", "completed")
+            scan.load_output("risk_profile", risk_out)
+    else:
+        scan.set_stage("risk-profiler", "skipped")
+
+    # ---- STAGE 5: COMPLIANCE ----
+    scan.update_status(ScanStatus.COMPLIANCE_CHECK, "compliance")
+    scan.set_stage("compliance", "running")
+
+    compliance_args = [
+        "--scanner", scanner_out,
+        "--analyzer", analyzer_out,
+        "--output-json", compliance_json,
+        "--output-md", compliance_md,
+    ]
+    if os.path.exists(fixer_out):
+        compliance_args.extend(["--fixer", fixer_out])
+
+    rc, err = await run_agent(
+        "compliance", COMPLIANCE_DIR, "compliance.py", compliance_args
+    )
+    if rc != 0:
+        scan.set_stage("compliance", "failed")
+        print(f"  [!] Compliance failed (non-blocking): {err}")
+    else:
+        scan.set_stage("compliance", "completed")
+        scan.load_output("compliance", compliance_json)
+
+    # ---- DONE ----
+    scan.update_status(ScanStatus.COMPLETED)
+    scan.current_stage = None
+
+    print(f"\n{'='*60}")
+    print(f"  Pipeline completed: {scan.id}")
+    print(f"  Status: {scan.status.value}")
+    print(f"  Findings: {scan.total_findings} total, "
+          f"{scan.confirmed_findings} confirmed, "
+          f"{scan.fixed_findings} fixed")
+    print(f"{'='*60}\n")

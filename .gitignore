@@ -69,6 +69,7 @@ web_modules/
 .env
 .env.*
 !.env.example
+!.env.local.example
 
 # parcel-bundler cache (https://parceljs.org/)
 .cache
@@ -150,3 +151,18 @@ venv/
 
 # SQLite databases (demo-app)
 banking.db
+
+# Agent reports (generated at runtime)
+reports/
+
+# Claude Code session files
+.claude/
+
+# Windows artifacts
+nul
+
+# Dashboard env (has API URL)
+dashboard/.env.local
+
+# Next.js
+dashboard/.next/
