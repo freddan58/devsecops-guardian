@@ -34,3 +34,7 @@ COMPLIANCE_DIR = os.path.join(AGENTS_DIR, "compliance")
 # Pipeline defaults
 DEFAULT_SCAN_PATH = os.getenv("DEFAULT_SCAN_PATH", "demo-app")
 PIPELINE_TIMEOUT = int(os.getenv("PIPELINE_TIMEOUT", "600"))  # 10 min max
+
+# Azure Table Storage (persistence)
+AZURE_STORAGE_CONNECTION_STRING = os.getenv("AZURE_STORAGE_CONNECTION_STRING", "")
+STORAGE_TABLE_NAME = os.getenv("STORAGE_TABLE_NAME", "scans")

@@ -26,6 +26,7 @@
 #   DASHBOARD_APP_NAME        - Container App name for Dashboard
 #   API_URL                   - Full HTTPS URL of the API gateway
 #   DASHBOARD_URL             - Full HTTPS URL of the dashboard
+#   AZURE_STORAGE_CONNECTION_STRING - Azure Table Storage connection (mark as secret)
 #
 # Required service connections:
 #   acr-devsecops-guardian    - Docker Registry (ACR) service connection
@@ -396,7 +397,9 @@ stages:
                       az containerapp update \
                         --name $(API_APP_NAME) \
                         --resource-group $(RESOURCE_GROUP) \
-                        --image $(ACR_LOGIN_SERVER)/api-gateway:$(imageTag)
+                        --image $(ACR_LOGIN_SERVER)/api-gateway:$(imageTag) \
+                        --set-env-vars \
+                          "AZURE_STORAGE_CONNECTION_STRING=$(AZURE_STORAGE_CONNECTION_STRING)"
 
       - deployment: DeployDashboard
         displayName: 'Deploy Dashboard'

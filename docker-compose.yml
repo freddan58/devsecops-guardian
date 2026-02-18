@@ -20,6 +20,7 @@ services:
       - GITHUB_TOKEN=${GITHUB_TOKEN}
       - GITHUB_OWNER=${GITHUB_OWNER:-freddan58}
       - GITHUB_REPO=${GITHUB_REPO:-devsecops-guardian}
+      - AZURE_STORAGE_CONNECTION_STRING=${AZURE_STORAGE_CONNECTION_STRING:-}
     volumes:
       - reports-data:/app/reports
     healthcheck:

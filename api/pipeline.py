@@ -19,7 +19,7 @@ from config import (
     COMPLIANCE_DIR,
     PIPELINE_TIMEOUT,
 )
-from models import ScanRecord, ScanStore, scan_store
+from models import ScanRecord, scan_store
 from schemas import ScanStatus
 
 
@@ -100,6 +100,7 @@ async def run_pipeline(scan: ScanRecord):
     # ---- STAGE 1: SCANNER ----
     scan.update_status(ScanStatus.SCANNING, "scanner")
     scan.set_stage("scanner", "running")
+    scan_store.save(scan)
 
     scanner_args = ["--path", scan.repository_path, "--output", scanner_out]
     if scan.ref:
@@ -109,17 +110,21 @@ async def run_pipeline(scan: ScanRecord):
     if rc != 0:
         scan.set_stage("scanner", "failed")
         scan.set_error(f"Scanner failed: {err}")
+        scan_store.save(scan)
         return
     scan.set_stage("scanner", "completed")
     scan.load_output("scanner", scanner_out)
+    scan_store.save(scan)
 
     if not os.path.exists(scanner_out):
         scan.set_error("Scanner output file not found")
+        scan_store.save(scan)
         return
 
     # ---- STAGE 2: ANALYZER ----
     scan.update_status(ScanStatus.ANALYZING, "analyzer")
     scan.set_stage("analyzer", "running")
+    scan_store.save(scan)
 
     analyzer_args = ["--input", scanner_out, "--output", analyzer_out]
     if scan.ref:
@@ -129,17 +134,21 @@ async def run_pipeline(scan: ScanRecord):
     if rc != 0:
         scan.set_stage("analyzer", "failed")
         scan.set_error(f"Analyzer failed: {err}")
+        scan_store.save(scan)
         return
     scan.set_stage("analyzer", "completed")
     scan.load_output("analyzer", analyzer_out)
+    scan_store.save(scan)
 
     if not os.path.exists(analyzer_out):
         scan.set_error("Analyzer output file not found")
+        scan_store.save(scan)
         return
 
     # ---- STAGE 3: FIXER ----
     scan.update_status(ScanStatus.FIXING, "fixer")
     scan.set_stage("fixer", "running")
+    scan_store.save(scan)
 
     fixer_args = ["--input", analyzer_out, "--output", fixer_out]
     if scan.ref:
@@ -155,11 +164,13 @@ async def run_pipeline(scan: ScanRecord):
     else:
         scan.set_stage("fixer", "completed")
         scan.load_output("fixer", fixer_out)
+    scan_store.save(scan)
 
     # ---- STAGE 4: RISK PROFILER ----
     if os.path.exists(RISK_PROFILER_DIR):
         scan.update_status(ScanStatus.PROFILING, "risk-profiler")
         scan.set_stage("risk-profiler", "running")
+        scan_store.save(scan)
 
         risk_args = [
             "--scanner", scanner_out,
@@ -180,10 +191,12 @@ async def run_pipeline(scan: ScanRecord):
             scan.load_output("risk_profile", risk_out)
     else:
         scan.set_stage("risk-profiler", "skipped")
+    scan_store.save(scan)
 
     # ---- STAGE 5: COMPLIANCE ----
     scan.update_status(ScanStatus.COMPLIANCE_CHECK, "compliance")
     scan.set_stage("compliance", "running")
+    scan_store.save(scan)
 
     compliance_args = [
         "--scanner", scanner_out,
@@ -207,6 +220,7 @@ async def run_pipeline(scan: ScanRecord):
     # ---- DONE ----
     scan.update_status(ScanStatus.COMPLETED)
     scan.current_stage = None
+    scan_store.save(scan)
 
     print(f"\n{'='*60}")
     print(f"  Pipeline completed: {scan.id}")

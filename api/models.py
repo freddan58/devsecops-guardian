@@ -1,8 +1,8 @@
 """
-DevSecOps Guardian - In-Memory Scan Store
+DevSecOps Guardian - Scan Store Factory
 
-Simple dict-based store for hackathon. In production, this would be
-a database (PostgreSQL, CosmosDB, etc.).
+Uses Azure Table Storage when AZURE_STORAGE_CONNECTION_STRING is set,
+falls back to in-memory store for local development.
 """
 
 import json
@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from schemas import ScanStatus
+from config import AZURE_STORAGE_CONNECTION_STRING, STORAGE_TABLE_NAME
 
 
 class ScanRecord:
@@ -44,25 +45,21 @@ class ScanRecord:
         self.stages: dict[str, str] = {}
 
     def update_status(self, status: ScanStatus, stage: Optional[str] = None):
-        """Update scan status and timestamp."""
         self.status = status
         self.updated_at = datetime.now(timezone.utc).isoformat()
         if stage:
             self.current_stage = stage
 
     def set_stage(self, stage: str, status: str):
-        """Track individual stage status."""
         self.stages[stage] = status
         self.updated_at = datetime.now(timezone.utc).isoformat()
 
     def set_error(self, error: str):
-        """Mark scan as failed with error message."""
         self.status = ScanStatus.FAILED
         self.error = error
         self.updated_at = datetime.now(timezone.utc).isoformat()
 
     def load_output(self, agent: str, file_path: str):
-        """Load agent JSON output from file."""
         if not os.path.exists(file_path):
             return
         try:
@@ -103,7 +100,6 @@ class ScanRecord:
         return None
 
     def to_summary(self) -> dict[str, Any]:
-        """Convert to summary dict for API response."""
         return {
             "id": self.id,
             "status": self.status.value,
@@ -122,7 +118,6 @@ class ScanRecord:
         }
 
     def to_detail(self) -> dict[str, Any]:
-        """Convert to full detail dict for API response."""
         detail = self.to_summary()
         detail.update({
             "scanner_output": self.scanner_output,
@@ -136,7 +131,7 @@ class ScanRecord:
 
 
 class ScanStore:
-    """In-memory store for scan records."""
+    """In-memory store for scan records (local development fallback)."""
 
     def __init__(self):
         self._scans: dict[str, ScanRecord] = {}
@@ -147,17 +142,14 @@ class ScanStore:
         ref: Optional[str] = None,
         dry_run: bool = False,
     ) -> ScanRecord:
-        """Create a new scan record."""
         scan = ScanRecord(repository_path, ref, dry_run)
         self._scans[scan.id] = scan
         return scan
 
     def get(self, scan_id: str) -> Optional[ScanRecord]:
-        """Get scan by ID."""
         return self._scans.get(scan_id)
 
     def list_all(self) -> list[ScanRecord]:
-        """List all scans, newest first."""
         return sorted(
             self._scans.values(),
             key=lambda s: s.created_at,
@@ -167,6 +159,28 @@ class ScanStore:
     def count(self) -> int:
         return len(self._scans)
 
+    def save(self, scan: ScanRecord):
+        """No-op for in-memory store (already in dict)."""
+        self._scans[scan.id] = scan
+
+
+def _create_store():
+    """Factory: use Table Storage if configured, else in-memory."""
+    if AZURE_STORAGE_CONNECTION_STRING:
+        try:
+            from table_store import TableScanStore
+            store = TableScanStore(AZURE_STORAGE_CONNECTION_STRING, STORAGE_TABLE_NAME)
+            if store._client:
+                print("  [✓] Using Azure Table Storage for persistence")
+                return store
+        except ImportError:
+            print("  [!] azure-data-tables not installed, using in-memory store")
+        except Exception as e:
+            print(f"  [!] Table Storage init failed: {e}, using in-memory store")
+
+    print("  [i] Using in-memory store (data will not persist across restarts)")
+    return ScanStore()
+
 
 # Global store instance
-scan_store = ScanStore()
+scan_store = _create_store()
