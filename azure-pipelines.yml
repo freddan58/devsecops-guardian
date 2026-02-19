@@ -363,6 +363,12 @@ stages:
                 latest
 
           - task: Docker@2
+            displayName: 'Re-login to ACR (token refresh)'
+            inputs:
+              containerRegistry: 'acr-devsecops-guardian'
+              command: 'login'
+
+          - task: Docker@2
             displayName: 'Build & Push Dashboard'
             inputs:
               containerRegistry: 'acr-devsecops-guardian'
