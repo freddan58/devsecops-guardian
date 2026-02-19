@@ -16,7 +16,7 @@ API_PORT = int(os.getenv("API_PORT", "8000"))
 # CORS - allowed origins (comma-separated)
 CORS_ORIGINS = os.getenv(
     "CORS_ORIGINS",
-    "http://localhost:3000,http://127.0.0.1:3000"
+    "http://localhost:3000,http://127.0.0.1:3000,https://ca-dashboard.agreeablesand-6566841b.eastus.azurecontainerapps.io"
 ).split(",")
 
 # Paths
