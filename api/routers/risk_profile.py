@@ -44,19 +44,32 @@ async def get_risk_profile(scan_id: str):
     if scan.risk_profile_output:
         data = scan.risk_profile_output
         owasp = []
-        for key, val in data.get("owasp_top_10", {}).items():
-            if isinstance(val, dict):
-                owasp.append(OWASPCategory(
-                    category=key.replace("_", " "),
-                    score=val.get("score", 0),
-                    findings_count=val.get("findings", 0),
-                    description=val.get("description", ""),
-                ))
-            else:
-                owasp.append(OWASPCategory(
-                    category=key.replace("_", " "),
-                    score=val if isinstance(val, int) else 0,
-                ))
+        raw_owasp = data.get("owasp_top_10", [])
+
+        # Handle both list format (from agent) and dict format
+        if isinstance(raw_owasp, list):
+            for item in raw_owasp:
+                if isinstance(item, dict):
+                    owasp.append(OWASPCategory(
+                        category=item.get("category", "Unknown"),
+                        score=item.get("score", 0),
+                        findings_count=item.get("findings_count", 0),
+                        description=item.get("description", ""),
+                    ))
+        elif isinstance(raw_owasp, dict):
+            for key, val in raw_owasp.items():
+                if isinstance(val, dict):
+                    owasp.append(OWASPCategory(
+                        category=key.replace("_", " "),
+                        score=val.get("score", 0),
+                        findings_count=val.get("findings", 0),
+                        description=val.get("description", ""),
+                    ))
+                else:
+                    owasp.append(OWASPCategory(
+                        category=key.replace("_", " "),
+                        score=val if isinstance(val, int) else 0,
+                    ))
 
         return RiskProfileResponse(
             scan_id=scan_id,
