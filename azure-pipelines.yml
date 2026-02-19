@@ -341,15 +341,14 @@ stages:
         eq(variables['Build.SourceBranch'], 'refs/heads/main')
       )
     jobs:
-      - job: BuildImages
-        displayName: 'Build & Push All Images'
+      - job: BuildAPI
+        displayName: 'Build API Gateway Image'
         steps:
           - task: Docker@2
             displayName: 'Login to ACR'
             inputs:
               containerRegistry: 'acr-devsecops-guardian'
               command: 'login'
-
           - task: Docker@2
             displayName: 'Build & Push API Gateway'
             inputs:
@@ -362,12 +361,14 @@ stages:
                 $(imageTag)
                 latest
 
+      - job: BuildDashboard
+        displayName: 'Build Dashboard Image'
+        steps:
           - task: Docker@2
-            displayName: 'Re-login to ACR (token refresh)'
+            displayName: 'Login to ACR'
             inputs:
               containerRegistry: 'acr-devsecops-guardian'
               command: 'login'
-
           - task: Docker@2
             displayName: 'Build & Push Dashboard'
             inputs:
