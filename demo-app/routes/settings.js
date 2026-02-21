@@ -9,12 +9,13 @@ const router = express.Router();
 // In-memory user preferences store
 const userPreferences = {};
 
-// VULNERABLE: Deep merge without prototype pollution protection
+// FIXED: Added checks to prevent prototype pollution by disallowing __proto__, constructor, and prototype keys
 function deepMerge(target, source) {
   for (const key in source) {
-    // VULNERABLE: No check for __proto__, constructor, or prototype keys
-    // Attacker sends: { "__proto__": { "isAdmin": true } }
-    // This pollutes Object.prototype, making ALL objects have isAdmin = true
+    if (key === '__proto__' || key === 'constructor' || key === 'prototype') {
+      // Skip dangerous keys to prevent prototype pollution
+      continue;
+    }
     if (typeof source[key] === 'object' && source[key] !== null && !Array.isArray(source[key])) {
       if (!target[key]) target[key] = {};
       deepMerge(target[key], source[key]);
@@ -35,7 +36,7 @@ router.post('/preferences', (req, res) => {
     return res.status(400).json({ error: 'Invalid preferences payload' });
   }
 
-  // VULNERABLE: Using unsafe deep merge with user input
+  // Using safe deep merge with prototype pollution protection
   if (!userPreferences[userId]) {
     userPreferences[userId] = { theme: 'light', notifications: true, language: 'en' };
   }
