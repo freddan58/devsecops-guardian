@@ -4,8 +4,14 @@ Analyzer Agent - LLM Analysis Engine
 Sends scanner findings + source code to Azure OpenAI for
 contextual vulnerability triage. Determines which findings
 are real exploitable vulnerabilities vs false positives.
+
+Supports two modes:
+- Foundry mode (FOUNDRY_ENDPOINT set): Routes calls through Azure AI Foundry
+  for telemetry, evaluation, and monitoring via App Insights.
+- Direct mode (fallback): Uses httpx to call Azure OpenAI directly.
 """
 
+import asyncio
 import json
 import os
 import httpx
@@ -17,6 +23,28 @@ from config import (
     AZURE_OPENAI_API_VERSION,
 )
 from prompts import ANALYZER_SYSTEM_PROMPT, ANALYZER_USER_PROMPT
+
+# Foundry integration
+FOUNDRY_ENDPOINT = os.getenv("FOUNDRY_ENDPOINT", "")
+MODEL_DEPLOYMENT = os.getenv("MODEL_DEPLOYMENT", "gpt-4.1-mini")
+FOUNDRY_AGENT_NAME = "VulnerabilityAnalyzer"
+
+_foundry_openai = None
+
+
+def _get_foundry_openai():
+    """Get OpenAI client configured for Foundry project (cached)."""
+    global _foundry_openai
+    if _foundry_openai is None:
+        from azure.ai.projects import AIProjectClient
+        from azure.identity import DefaultAzureCredential
+        project = AIProjectClient(
+            endpoint=FOUNDRY_ENDPOINT,
+            credential=DefaultAzureCredential(),
+        )
+        _foundry_openai = project.get_openai_client()
+        print(f"  [Foundry] OpenAI client initialized for {FOUNDRY_AGENT_NAME}")
+    return _foundry_openai
 
 
 def _get_language(file_path: str) -> str:
@@ -41,7 +69,44 @@ def _get_language(file_path: str) -> str:
 
 
 async def _call_llm(messages: list[dict]) -> str:
-    """Call Azure OpenAI chat completion API."""
+    """Call LLM via Foundry project or direct Azure OpenAI."""
+    if FOUNDRY_ENDPOINT:
+        return await _call_via_foundry(messages)
+    return await _call_direct(messages)
+
+
+async def _call_via_foundry(messages: list[dict]) -> str:
+    """Call LLM through Foundry Responses API (enables telemetry + evaluation)."""
+    user_parts = [m["content"] for m in messages if m["role"] == "user"]
+    user_prompt = "\n\n".join(user_parts)
+
+    def _sync_call():
+        client = _get_foundry_openai()
+        try:
+            response = client.responses.create(
+                model=FOUNDRY_AGENT_NAME,
+                input=[{"role": "user", "content": user_prompt}],
+                text={"format": {"type": "json_object"}},
+            )
+            print(f"  [Foundry] {FOUNDRY_AGENT_NAME} responded via Responses API")
+            return response.output_text
+        except Exception as e:
+            print(f"  [Foundry] Responses API: {e}, using chat completions fallback")
+            response = client.chat.completions.create(
+                model=MODEL_DEPLOYMENT,
+                messages=messages,
+                temperature=0.1,
+                max_tokens=8000,
+                response_format={"type": "json_object"},
+                user=FOUNDRY_AGENT_NAME,
+            )
+            return response.choices[0].message.content
+
+    return await asyncio.to_thread(_sync_call)
+
+
+async def _call_direct(messages: list[dict]) -> str:
+    """Direct Azure OpenAI call via httpx (fallback when Foundry not configured)."""
     url = (
         f"{AZURE_OPENAI_ENDPOINT.rstrip('/')}"
         f"/openai/deployments/{AZURE_OPENAI_DEPLOYMENT}"

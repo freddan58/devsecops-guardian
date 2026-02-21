@@ -27,6 +27,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from config import CORS_ORIGINS, REPORTS_DIR
+from models import scan_store
+from schemas import ScanStatus
 from routers import health, scans, findings, compliance, risk_profile, practices
 
 # Create FastAPI app
@@ -62,10 +64,44 @@ app.include_router(risk_profile.router)
 app.include_router(practices.router)
 
 
+def _recover_orphaned_scans():
+    """Mark any RUNNING scans as FAILED on startup.
+
+    BackgroundTasks don't survive container restarts, so any scan
+    that was in a running state (SCANNING, ANALYZING, FIXING, etc.)
+    when the container restarted is now orphaned and will never complete.
+    """
+    running_statuses = {
+        ScanStatus.SCANNING,
+        ScanStatus.ANALYZING,
+        ScanStatus.FIXING,
+        ScanStatus.PROFILING,
+        ScanStatus.COMPLIANCE_CHECK,
+    }
+    recovered = 0
+    try:
+        all_scans = scan_store.list_all()
+        for scan in all_scans:
+            if scan.status in running_statuses:
+                scan.set_error("Pipeline interrupted by container restart")
+                scan_store.save(scan)
+                recovered += 1
+                print(f"  [recovery] {scan.id}: {scan.status.value} → FAILED")
+    except Exception as e:
+        print(f"  [!] Scan recovery error: {e}")
+
+    if recovered:
+        print(f"  [recovery] Recovered {recovered} orphaned scan(s)")
+
+
 @app.on_event("startup")
 async def startup():
-    """Ensure reports directory exists on startup."""
+    """Ensure reports directory exists and recover orphaned scans on startup."""
     os.makedirs(REPORTS_DIR, exist_ok=True)
+
+    # Recover scans that were running when the container restarted
+    _recover_orphaned_scans()
+
     print(f"\n{'='*60}")
     print("  DevSecOps Guardian - API Gateway")
     print(f"  Reports directory: {REPORTS_DIR}")

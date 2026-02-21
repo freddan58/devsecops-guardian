@@ -4,6 +4,9 @@ Register all 5 DevSecOps Guardian agents in Foundry Agent Service.
 Uses the new Responses API (azure-ai-projects v2) — agents appear in the
 main "Agents" section of Azure AI Foundry portal, NOT under "Classic Agents".
 
+Registers agents with FULL system prompts (loaded from each agent's prompts.py)
+so that Foundry agents can be invoked at runtime via the Responses API.
+
 Also registers the GitHub MCP Server as a native MCPTool on the SecurityFixer
 agent, demonstrating Azure MCP integration.
 
@@ -11,72 +14,60 @@ Run once:
     python register_all_agents.py
 """
 
+import importlib.util
 import os
 import sys
 from foundry_client import get_foundry_client, register_agent
-from azure.ai.projects.models import MCPTool
+from azure.ai.projects.models import MCPTool, CodeInterpreterTool, BingGroundingTool
 
 
+AGENTS_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def _load_prompt(agent_subdir: str, prompt_var: str) -> str:
+    """Load a system prompt from an agent's prompts.py module.
+
+    Dynamically imports the prompts module from each agent directory
+    and extracts the specified prompt variable.
+    """
+    prompts_path = os.path.join(AGENTS_DIR, agent_subdir, "prompts.py")
+    if not os.path.exists(prompts_path):
+        print(f"  [WARN] {prompts_path} not found, using fallback instructions")
+        return ""
+    spec = importlib.util.spec_from_file_location("prompts", prompts_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return getattr(module, prompt_var, "")
+
+
+# Load FULL system prompts from each agent's prompts.py
+# These are the same prompts used by each agent's llm_engine.py,
+# ensuring Foundry agents behave identically to local agents.
 AGENTS_CONFIG = [
     {
         "name": "SecurityScanner",
         "description": "LLM-based code vulnerability detection agent",
-        "instructions": (
-            "You are a security scanner agent that analyzes source code for vulnerabilities. "
-            "You scan code files using LLM reasoning (not regex) to detect: SQL injection, XSS, "
-            "SSRF, broken authentication, IDOR, hardcoded secrets, insecure crypto, business "
-            "logic flaws, missing input validation, and IaC misconfigurations.\n\n"
-            "Output: JSON array of findings with file, line, CWE code, severity, description, "
-            "and evidence."
-        ),
+        "instructions": _load_prompt("scanner", "SCANNER_SYSTEM_PROMPT"),
     },
     {
         "name": "VulnerabilityAnalyzer",
         "description": "Contextual false positive elimination agent",
-        "instructions": (
-            "You are a vulnerability analyzer agent that performs contextual false positive "
-            "elimination. For each finding from the Scanner, you reason about: endpoint exposure "
-            "(public vs authenticated), input sanitization upstream, authentication/authorization "
-            "in code path, data sensitivity (PCI/PII), and actual exploitability given the "
-            "application architecture.\n\n"
-            "Output: Confirmed/false_positive verdict with exploitability score (0-100) "
-            "and reasoning."
-        ),
+        "instructions": _load_prompt("analyzer", "ANALYZER_SYSTEM_PROMPT"),
     },
     {
         "name": "SecurityFixer",
         "description": "Automated remediation code generation agent with GitHub MCP tools",
-        "instructions": (
-            "You are a security fixer agent that generates code fixes for confirmed "
-            "vulnerabilities. For each confirmed finding, you: read the vulnerable code, "
-            "generate a framework-aware fix, create a draft Pull Request on a security/ "
-            "branch, and add PR comments explaining the fix rationale.\n\n"
-            "You have access to GitHub MCP tools for reading files, creating branches, "
-            "creating PRs, and posting review comments.\n\n"
-            "Output: Fixed code, fix explanation, PR branch name, and fix strategy."
-        ),
+        "instructions": _load_prompt("fixer", "FIXER_SYSTEM_PROMPT"),
     },
     {
         "name": "RiskProfiler",
         "description": "OWASP Top 10 risk assessment agent",
-        "instructions": (
-            "You are a risk profiler agent that generates OWASP-based risk profiles. "
-            "You analyze all confirmed findings and map them to OWASP Top 10 categories, "
-            "calculate risk scores per category, and produce a radar chart data structure.\n\n"
-            "Output: OWASP risk profile with category scores and overall risk level."
-        ),
+        "instructions": _load_prompt("risk-profiler", "RISK_PROFILER_SYSTEM_PROMPT"),
     },
     {
         "name": "ComplianceReporter",
         "description": "PCI-DSS 4.0 audit report generation agent",
-        "instructions": (
-            "You are a compliance reporter agent that generates PCI-DSS 4.0 audit-ready "
-            "reports. You map each finding to regulatory controls (PCI-DSS 4.0 Req 6.2.4, "
-            "6.3.1, 6.4.1, 8.3), build evidence trails (detected -> analyzed -> fix PR -> "
-            "merged -> verified), and produce compliance posture scores.\n\n"
-            "Output: Compliance report with regulatory mappings, evidence chains, and "
-            "compliance scores."
-        ),
+        "instructions": _load_prompt("compliance", "COMPLIANCE_SYSTEM_PROMPT"),
     },
 ]
 
@@ -103,6 +94,29 @@ def _get_mcp_tools():
     ]
 
 
+def _get_agent_tools(agent_name: str, mcp_tools: list) -> list | None:
+    """Build the tool list for a specific agent.
+
+    Tool assignment:
+        SecurityScanner     → CodeInterpreterTool
+        VulnerabilityAnalyzer → CodeInterpreterTool
+        SecurityFixer       → MCPTool (GitHub) + CodeInterpreterTool
+        RiskProfiler        → BingGroundingTool
+        ComplianceReporter  → BingGroundingTool
+    """
+    tools = []
+
+    if agent_name in ("SecurityScanner", "VulnerabilityAnalyzer"):
+        tools.append(CodeInterpreterTool())
+    elif agent_name == "SecurityFixer":
+        tools.append(CodeInterpreterTool())
+        tools.extend(mcp_tools)
+    elif agent_name in ("RiskProfiler", "ComplianceReporter"):
+        tools.append(BingGroundingTool())
+
+    return tools if tools else None
+
+
 def main():
     print("Connecting to Foundry Agent Service (Responses API v2)...")
     try:
@@ -124,8 +138,7 @@ def main():
     registered = []
     for config in AGENTS_CONFIG:
         try:
-            # Attach MCP tools to SecurityFixer agent
-            tools = mcp_tools if config["name"] == "SecurityFixer" and mcp_tools else None
+            tools = _get_agent_tools(config["name"], mcp_tools)
 
             agent = register_agent(
                 client,
@@ -134,7 +147,8 @@ def main():
                 description=config["description"],
                 tools=tools,
             )
-            tool_info = " + MCP tools" if tools else ""
+            tool_names = [type(t).__name__ for t in (tools or [])]
+            tool_info = f" + tools: {tool_names}" if tool_names else ""
             print(f"  [OK] {config['name']} registered (Name: {agent.name}){tool_info}")
             registered.append({"name": config["name"], "agent_name": agent.name})
         except Exception as e:
