@@ -20,15 +20,12 @@ async def create_scan(
     request: ScanRequest,
     background_tasks: BackgroundTasks,
 ):
-    """Trigger a new security scan.
-
-    Creates a scan record and launches the multi-agent pipeline
-    in the background. Poll GET /api/scans/{id} for status updates.
-    """
+    """Trigger a new security scan."""
     scan = scan_store.create(
         repository_path=request.repository_path,
         ref=request.ref,
         dry_run=request.dry_run,
+        parent_scan_id=request.parent_scan_id,
     )
 
     # Launch pipeline in background
@@ -50,3 +47,12 @@ async def get_scan(scan_id: str):
     if not scan:
         raise HTTPException(status_code=404, detail=f"Scan {scan_id} not found")
     return ScanDetail(**scan.to_detail())
+
+
+@router.get("/{scan_id}/history", response_model=list[ScanSummary])
+async def get_scan_history(scan_id: str):
+    """Get the scan history chain for re-scans."""
+    history = scan_store.get_history(scan_id)
+    if not history:
+        raise HTTPException(status_code=404, detail=f"Scan {scan_id} not found")
+    return [ScanSummary(**s.to_summary()) for s in history]

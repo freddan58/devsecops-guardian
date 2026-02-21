@@ -23,12 +23,15 @@ class ScanRecord:
         repository_path: str,
         ref: Optional[str] = None,
         dry_run: bool = False,
+        parent_scan_id: Optional[str] = None,
     ):
         self.id = f"scan-{uuid.uuid4().hex[:12]}"
         self.status = ScanStatus.QUEUED
         self.repository_path = repository_path
         self.ref = ref
         self.dry_run = dry_run
+        self.parent_scan_id = parent_scan_id
+        self.scan_number = 1
         self.created_at = datetime.now(timezone.utc).isoformat()
         self.updated_at = self.created_at
         self.current_stage: Optional[str] = None
@@ -43,6 +46,9 @@ class ScanRecord:
 
         # Stage tracking
         self.stages: dict[str, str] = {}
+
+        # Re-scan comparison results
+        self.comparison: Optional[dict] = None
 
     def update_status(self, status: ScanStatus, stage: Optional[str] = None):
         self.status = status
@@ -115,6 +121,8 @@ class ScanRecord:
             "compliance_rating": self.compliance_rating,
             "current_stage": self.current_stage,
             "error": self.error,
+            "parent_scan_id": self.parent_scan_id,
+            "scan_number": self.scan_number,
         }
 
     def to_detail(self) -> dict[str, Any]:
@@ -126,6 +134,7 @@ class ScanRecord:
             "risk_profile_output": self.risk_profile_output,
             "compliance_output": self.compliance_output,
             "stages": self.stages,
+            "comparison": self.comparison,
         })
         return detail
 
@@ -141,10 +150,48 @@ class ScanStore:
         repository_path: str,
         ref: Optional[str] = None,
         dry_run: bool = False,
+        parent_scan_id: Optional[str] = None,
     ) -> ScanRecord:
-        scan = ScanRecord(repository_path, ref, dry_run)
+        scan = ScanRecord(repository_path, ref, dry_run, parent_scan_id)
+
+        # Calculate scan_number based on parent chain
+        if parent_scan_id:
+            parent = self.get(parent_scan_id)
+            if parent:
+                scan.scan_number = parent.scan_number + 1
+
         self._scans[scan.id] = scan
         return scan
+
+    def get_history(self, scan_id: str) -> list["ScanRecord"]:
+        """Get scan history chain (parent -> child)."""
+        # Find root scan
+        scan = self.get(scan_id)
+        if not scan:
+            return []
+
+        # Walk up to find root
+        root = scan
+        while root.parent_scan_id:
+            parent = self.get(root.parent_scan_id)
+            if not parent:
+                break
+            root = parent
+
+        # Walk down collecting chain
+        chain = [root]
+        current_id = root.id
+        while True:
+            child = next(
+                (s for s in self._scans.values() if s.parent_scan_id == current_id),
+                None,
+            )
+            if not child:
+                break
+            chain.append(child)
+            current_id = child.id
+
+        return chain
 
     def get(self, scan_id: str) -> Optional[ScanRecord]:
         return self._scans.get(scan_id)

@@ -132,6 +132,7 @@ class ScanDetail(ScanSummary):
     risk_profile_output: Optional[dict[str, Any]] = None
     compliance_output: Optional[dict[str, Any]] = None
     stages: dict[str, str] = Field(default_factory=dict)
+    comparison: Optional[dict[str, Any]] = None
 
 
 class Finding(BaseModel):
