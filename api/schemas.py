@@ -40,6 +40,8 @@ class FixStatus(str, Enum):
     FAILED = "FAILED"
     DRY_RUN = "DRY_RUN"
     PENDING = "PENDING"
+    FIX_GENERATED = "FIX_GENERATED"
+    PARTIAL = "PARTIAL"
 
 
 class RiskLevel(str, Enum):
@@ -48,6 +50,37 @@ class RiskLevel(str, Enum):
     MEDIUM = "MEDIUM"
     LOW = "LOW"
     MINIMAL = "MINIMAL"
+
+
+class StatusChange(str, Enum):
+    NEW = "NEW"
+    PERSISTENT = "PERSISTENT"
+    RESOLVED = "RESOLVED"
+    REGRESSION = "REGRESSION"
+
+
+class CodeContext(BaseModel):
+    vulnerable_code: str = ""
+    related_files: list[dict[str, str]] = Field(default_factory=list)
+
+
+class BestPracticeViolation(BaseModel):
+    practice: str
+    category: str
+    current_state: str = ""
+    recommended_state: str = ""
+    owasp_reference: str = ""
+
+
+class BestPracticeFollowed(BaseModel):
+    practice: str
+    category: str
+    detail: str = ""
+
+
+class BestPracticesAnalysis(BaseModel):
+    violated_practices: list[BestPracticeViolation] = Field(default_factory=list)
+    followed_practices: list[BestPracticeFollowed] = Field(default_factory=list)
 
 
 # ---------- Requests ----------
@@ -64,6 +97,10 @@ class ScanRequest(BaseModel):
     dry_run: bool = Field(
         default=False,
         description="Skip GitHub writes (no branches, commits, or PRs)"
+    )
+    parent_scan_id: Optional[str] = Field(
+        default=None,
+        description="ID of parent scan for re-scan comparison"
     )
 
 
@@ -84,6 +121,8 @@ class ScanSummary(BaseModel):
     compliance_rating: Optional[str] = None
     current_stage: Optional[str] = None
     error: Optional[str] = None
+    parent_scan_id: Optional[str] = None
+    scan_number: int = 1
 
 
 class ScanDetail(ScanSummary):
@@ -112,6 +151,21 @@ class Finding(BaseModel):
     fix_summary: Optional[str] = None
     pr_url: Optional[str] = None
     pr_number: Optional[int] = None
+    # New fields - Feature 1: Detail Modal
+    code_context: Optional[CodeContext] = None
+    analysis_reasoning: str = ""
+    best_practices_analysis: Optional[BestPracticesAnalysis] = None
+    fixed_code: str = ""
+    fix_explanation: str = ""
+    fix_error: str = ""
+    # Analyzer enrichment fields
+    auth_context: str = ""
+    data_sensitivity: str = ""
+    attack_scenario: Optional[str] = None
+    false_positive_reason: Optional[str] = None
+    confirmed_evidence: Optional[str] = None
+    # Re-scan comparison
+    status_change: Optional[str] = None
 
 
 class FindingsResponse(BaseModel):
@@ -169,6 +223,36 @@ class RiskProfileResponse(BaseModel):
     owasp_top_10: list[OWASPCategory] = Field(default_factory=list)
     attack_surface: dict[str, Any] = Field(default_factory=dict)
     executive_summary: str = ""
+
+
+class ScanComparisonFinding(BaseModel):
+    scan_id: str
+    vulnerability: str
+    cwe: str
+    file: str
+    severity: str
+    status_change: str  # NEW, RESOLVED, PERSISTENT, REGRESSION
+
+
+class ScanComparison(BaseModel):
+    current_scan_id: str
+    parent_scan_id: str
+    new_findings: int = 0
+    resolved_findings: int = 0
+    persistent_findings: int = 0
+    regression_findings: int = 0
+    findings: list[ScanComparisonFinding] = Field(default_factory=list)
+
+
+class PracticesSummary(BaseModel):
+    scan_id: str
+    total_violations: int = 0
+    total_followed: int = 0
+    maturity_score: int = 0  # 0-100
+    categories: dict[str, dict[str, int]] = Field(default_factory=dict)
+    top_violations: list[BestPracticeViolation] = Field(default_factory=list)
+    top_followed: list[BestPracticeFollowed] = Field(default_factory=list)
+    anti_patterns: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class HealthResponse(BaseModel):
