@@ -1,19 +1,27 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { createScan } from "@/lib/api";
 
 interface NewScanDialogProps {
   open: boolean;
   onClose: () => void;
   onCreated: () => void;
+  parentScanId?: string;
+  defaultRepo?: string;
 }
 
-export function NewScanDialog({ open, onClose, onCreated }: NewScanDialogProps) {
-  const [repoPath, setRepoPath] = useState("demo-app");
+export function NewScanDialog({ open, onClose, onCreated, parentScanId, defaultRepo }: NewScanDialogProps) {
+  const [repoPath, setRepoPath] = useState(defaultRepo || "demo-app");
   const [dryRun, setDryRun] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (open && defaultRepo) {
+      setRepoPath(defaultRepo);
+    }
+  }, [open, defaultRepo]);
 
   if (!open) return null;
 
@@ -25,6 +33,7 @@ export function NewScanDialog({ open, onClose, onCreated }: NewScanDialogProps) 
       await createScan({
         repository_path: repoPath,
         dry_run: dryRun,
+        ...(parentScanId ? { parent_scan_id: parentScanId } : {}),
       });
       onCreated();
       onClose();
@@ -35,11 +44,16 @@ export function NewScanDialog({ open, onClose, onCreated }: NewScanDialogProps) 
     }
   };
 
+  const dialogTitle = parentScanId ? "Re-Scan Repository" : "New Security Scan";
+  const submitLabel = parentScanId
+    ? loading ? "Starting Re-Scan..." : "Start Re-Scan"
+    : loading ? "Starting..." : "Start Scan";
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
       <div className="card w-full max-w-md mx-4">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-white">New Security Scan</h2>
+          <h2 className="text-lg font-semibold text-white">{dialogTitle}</h2>
           <button
             onClick={onClose}
             className="text-slate-400 hover:text-white transition-colors"
@@ -49,6 +63,12 @@ export function NewScanDialog({ open, onClose, onCreated }: NewScanDialogProps) 
             </svg>
           </button>
         </div>
+
+        {parentScanId && (
+          <div className="mb-4 p-3 rounded-lg bg-blue-500/10 border border-blue-500/30 text-blue-400 text-sm">
+            This re-scan will be compared against the parent scan to track security improvements.
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
@@ -99,7 +119,7 @@ export function NewScanDialog({ open, onClose, onCreated }: NewScanDialogProps) 
               disabled={loading || !repoPath.trim()}
               className="flex-1 px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium transition-colors"
             >
-              {loading ? "Starting..." : "Start Scan"}
+              {submitLabel}
             </button>
           </div>
         </form>

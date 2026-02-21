@@ -64,6 +64,7 @@ export async function createScan(body: {
   repository_path: string;
   ref?: string;
   dry_run?: boolean;
+  parent_scan_id?: string;
 }) {
   return fetchAPI<ScanSummary>("/api/scans", {
     method: "POST",
