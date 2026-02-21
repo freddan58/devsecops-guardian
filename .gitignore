@@ -169,3 +169,6 @@ dashboard/.next/
 
 # Infrastructure secrets (deploy script has API keys)
 infra/deploy.ps1
+
+# Git worktrees
+.worktrees/
