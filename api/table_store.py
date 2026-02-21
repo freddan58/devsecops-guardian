@@ -69,12 +69,15 @@ class ScanRecord:
         ref: Optional[str] = None,
         dry_run: bool = False,
         scan_id: Optional[str] = None,
+        parent_scan_id: Optional[str] = None,
     ):
         self.id = scan_id or f"scan-{uuid.uuid4().hex[:12]}"
         self.status = ScanStatus.QUEUED
         self.repository_path = repository_path
         self.ref = ref
         self.dry_run = dry_run
+        self.parent_scan_id = parent_scan_id
+        self.scan_number = 1
         self.created_at = datetime.now(timezone.utc).isoformat()
         self.updated_at = self.created_at
         self.current_stage: Optional[str] = None
@@ -89,6 +92,9 @@ class ScanRecord:
 
         # Stage tracking
         self.stages: dict[str, str] = {}
+
+        # Re-scan comparison results
+        self.comparison: Optional[dict] = None
 
         # Reference to store for auto-save
         self._store: Optional["TableScanStore"] = None
@@ -173,6 +179,8 @@ class ScanRecord:
             "compliance_rating": self.compliance_rating,
             "current_stage": self.current_stage,
             "error": self.error,
+            "parent_scan_id": self.parent_scan_id,
+            "scan_number": self.scan_number,
         }
 
     def to_detail(self) -> dict[str, Any]:
@@ -184,6 +192,7 @@ class ScanRecord:
             "risk_profile_output": self.risk_profile_output,
             "compliance_output": self.compliance_output,
             "stages": self.stages,
+            "comparison": self.comparison,
         })
         return detail
 
@@ -201,6 +210,9 @@ class ScanRecord:
             "current_stage": self.current_stage or "",
             "error": self.error or "",
             "stages": json.dumps(self.stages),
+            "parent_scan_id": self.parent_scan_id or "",
+            "scan_number": self.scan_number,
+            "comparison": _truncate(self.comparison),
             "scanner_output": _truncate(self.scanner_output),
             "analyzer_output": _truncate(self.analyzer_output),
             "fixer_output": _truncate(self.fixer_output),
@@ -216,6 +228,7 @@ class ScanRecord:
             ref=entity.get("ref") or None,
             dry_run=entity.get("dry_run", False),
             scan_id=entity["RowKey"],
+            parent_scan_id=entity.get("parent_scan_id") or None,
         )
         scan.status = ScanStatus(entity.get("status", "QUEUED"))
         scan.created_at = entity.get("created_at", scan.created_at)
@@ -223,6 +236,8 @@ class ScanRecord:
         scan.current_stage = entity.get("current_stage") or None
         scan.error = entity.get("error") or None
         scan.stages = _parse_json(entity.get("stages")) or {}
+        scan.scan_number = entity.get("scan_number", 1)
+        scan.comparison = _parse_json(entity.get("comparison"))
         scan.scanner_output = _parse_json(entity.get("scanner_output"))
         scan.analyzer_output = _parse_json(entity.get("analyzer_output"))
         scan.fixer_output = _parse_json(entity.get("fixer_output"))
@@ -274,9 +289,17 @@ class TableScanStore:
         repository_path: str,
         ref: Optional[str] = None,
         dry_run: bool = False,
+        parent_scan_id: Optional[str] = None,
     ) -> ScanRecord:
         """Create a new scan record and persist it."""
-        scan = ScanRecord(repository_path, ref, dry_run)
+        scan = ScanRecord(repository_path, ref, dry_run, parent_scan_id=parent_scan_id)
+
+        # Calculate scan_number based on parent chain
+        if parent_scan_id:
+            parent = self.get(parent_scan_id)
+            if parent:
+                scan.scan_number = parent.scan_number + 1
+
         self._attach_store(scan)
         self.save(scan)
         return scan
@@ -310,6 +333,36 @@ class TableScanStore:
         except Exception as e:
             print(f"  [!] Failed to list scans: {e}")
             return []
+
+    def get_history(self, scan_id: str) -> list[ScanRecord]:
+        """Get scan history chain (parent -> child)."""
+        scan = self.get(scan_id)
+        if not scan:
+            return []
+
+        # Walk up to find root
+        root = scan
+        while root.parent_scan_id:
+            parent = self.get(root.parent_scan_id)
+            if not parent:
+                break
+            root = parent
+
+        # Walk down collecting chain using all scans
+        all_scans = self.list_all()
+        scans_by_parent = {}
+        for s in all_scans:
+            if s.parent_scan_id:
+                scans_by_parent[s.parent_scan_id] = s
+
+        chain = [root]
+        current_id = root.id
+        while current_id in scans_by_parent:
+            child = scans_by_parent[current_id]
+            chain.append(child)
+            current_id = child.id
+
+        return chain
 
     def count(self) -> int:
         """Count total scans."""

@@ -181,7 +181,7 @@ def test_health(api_url: str, results: TestResults) -> bool:
                   f"status={data.get('status')}", f"status={data.get('status')}")
 
     agents = data.get("agents", {})
-    expected_agents = ["scanner", "analyzer", "fixer", "risk_profiler", "compliance"]
+    expected_agents = ["scanner", "analyzer", "fixer", "risk-profiler", "compliance"]
     for agent in expected_agents:
         results.check(f"Agent '{agent}' registered",
                       agent in agents,
