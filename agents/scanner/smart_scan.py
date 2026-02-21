@@ -99,7 +99,17 @@ Respond ONLY with a JSON object containing a "findings" array:
       "severity": "CRITICAL",
       "description": "Detailed description of the vulnerability",
       "evidence": "The actual vulnerable code snippet",
-      "recommendation": "How to fix it"
+      "recommendation": "How to fix it",
+      "code_context": {{
+        "vulnerable_code": "~30 lines centered on the vulnerability showing surrounding context",
+        "related_files": [
+          {{
+            "file": "middleware/auth.js",
+            "relevance": "Why this file matters for the vulnerability",
+            "snippet": "Key lines from the related file"
+          }}
+        ]
+      }}
     }}
   ]
 }}

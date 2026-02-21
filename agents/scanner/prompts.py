@@ -61,18 +61,17 @@ Respond ONLY with a JSON object containing a "findings" array. No explanations b
       "severity": "CRITICAL",
       "description": "User input from query parameter is concatenated directly into SQL query without parameterization.",
       "evidence": "const query = `SELECT * FROM accounts WHERE id = ${id}`",
-      "recommendation": "Use parameterized queries: db.prepare('SELECT * FROM accounts WHERE id = ?').get(id)"
-    },
-    {
-      "id": "SCAN-002",
-      "file": "another/file.js",
-      "line": 10,
-      "vulnerability": "...",
-      "cwe": "...",
-      "severity": "...",
-      "description": "...",
-      "evidence": "...",
-      "recommendation": "..."
+      "recommendation": "Use parameterized queries: db.prepare('SELECT * FROM accounts WHERE id = ?').get(id)",
+      "code_context": {
+        "vulnerable_code": "Lines 20-40 of the vulnerable file showing the vulnerability in context with surrounding code",
+        "related_files": [
+          {
+            "file": "middleware/auth.js",
+            "relevance": "Authentication middleware - this route has NO auth middleware applied",
+            "snippet": "Key lines from the related file showing how auth is (or isn't) applied"
+          }
+        ]
+      }
     }
   ]
 }
@@ -81,6 +80,15 @@ Respond ONLY with a JSON object containing a "findings" array. No explanations b
 IMPORTANT: Return ALL findings in a single "findings" array. Do NOT stop after the first finding. Analyze EVERY file thoroughly.
 
 If no vulnerabilities are found, respond with: {"findings": []}
+
+## Code Context Rules
+- **vulnerable_code**: Include approximately 30 lines centered on the vulnerability (15 lines above and below the vulnerable line). Include the full function containing the vulnerability if possible.
+- **related_files**: Include 1-3 related files that affect the vulnerability context:
+  - Auth middleware files (to show if route is protected or not)
+  - Configuration files (to show where secrets/config are defined)
+  - Server setup files (to show route registration and middleware chain)
+  - Only include files that are in the scan group or context map
+- Each related_files snippet should be 10-20 lines of the most relevant section
 
 ## Important
 - Do NOT flag parameterized/prepared statements as SQL injection
