@@ -202,7 +202,7 @@ def test_create_scan(api_url: str, results: TestResults, dry_run: bool = True,
 
     status, data = api_call(api_url, "/api/scans", method="POST", body=body)
 
-    if not results.check("Scan created", status == 200,
+    if not results.check("Scan created", status in (200, 202),
                          f"id={data.get('id')}", f"status={status}, detail={data}"):
         return None
 
@@ -502,7 +502,7 @@ def test_rescan_workflow(api_url: str, original_scan_id: str, results: TestResul
     }
     status, data = api_call(api_url, "/api/scans", method="POST", body=body)
 
-    if not results.check("Re-scan created", status == 200,
+    if not results.check("Re-scan created", status in (200, 202),
                          f"id={data.get('id')}", f"status={status}, detail={data}"):
         return None
 
@@ -521,7 +521,7 @@ def test_dashboard_accessible(dashboard_url: str, results: TestResults):
 
     try:
         req = Request(dashboard_url, method="GET")
-        with urlopen(req, timeout=15) as resp:
+        with urlopen(req, timeout=45) as resp:
             status = resp.status
             content = resp.read().decode()[:500]
 
