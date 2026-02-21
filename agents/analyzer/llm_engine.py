@@ -138,6 +138,17 @@ def _parse_analyses(raw_response: str) -> list[dict]:
                     0 if analysis["verdict"] == "FALSE_POSITIVE" else 50
                 )
 
+            # Preserve new enrichment fields (pass through as-is)
+            # analysis_reasoning and best_practices_analysis are already in the dict
+            # Just ensure defaults if missing
+            if "analysis_reasoning" not in analysis:
+                analysis["analysis_reasoning"] = ""
+            if "best_practices_analysis" not in analysis:
+                analysis["best_practices_analysis"] = {
+                    "violated_practices": [],
+                    "followed_practices": [],
+                }
+
             validated.append(analysis)
 
         return validated

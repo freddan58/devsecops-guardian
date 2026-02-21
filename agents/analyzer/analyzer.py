@@ -121,6 +121,12 @@ def merge_findings_with_analyses(
             "attack_scenario": analysis.get("attack_scenario"),
             "false_positive_reason": analysis.get("false_positive_reason"),
             "confirmed_evidence": analysis.get("confirmed_evidence"),
+            # New enrichment fields
+            "analysis_reasoning": analysis.get("analysis_reasoning", ""),
+            "best_practices_analysis": analysis.get("best_practices_analysis", {
+                "violated_practices": [],
+                "followed_practices": [],
+            }),
         }
         merged.append(merged_finding)
 

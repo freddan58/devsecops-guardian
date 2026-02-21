@@ -59,7 +59,33 @@ Respond ONLY with a JSON object containing an "analyses" array. No text before o
       "data_sensitivity": "HIGH - exposes account_number, owner_name, balance (PCI data)",
       "attack_scenario": "Attacker sends GET /api/accounts?id=1 OR 1=1 to dump all account records",
       "false_positive_reason": null,
-      "confirmed_evidence": "const query = `SELECT ... WHERE id = ${{id}}`"
+      "confirmed_evidence": "const query = `SELECT ... WHERE id = ${{id}}`",
+      "analysis_reasoning": "This SQL injection vulnerability is confirmed as CRITICAL because: 1) The endpoint GET /api/accounts is PUBLIC with no authentication middleware applied (verified by checking server.js route registration). 2) User input from req.query.id flows directly into a template literal SQL string without parameterization. 3) The query targets the accounts table which contains PCI-regulated data (account_number, balance, owner_name). 4) No input validation or sanitization exists before the query. An attacker can trivially exploit this via URL parameter injection to extract all banking records.",
+      "best_practices_analysis": {{
+        "violated_practices": [
+          {{
+            "practice": "Parameterized Queries",
+            "category": "Input Validation",
+            "current_state": "Raw string concatenation in SQL query using template literals",
+            "recommended_state": "Use prepared statements with ? placeholders via db.prepare()",
+            "owasp_reference": "A03:2021 - Injection"
+          }},
+          {{
+            "practice": "Input Validation",
+            "category": "Input Validation",
+            "current_state": "No validation on req.query.id parameter",
+            "recommended_state": "Validate that id is a positive integer before use",
+            "owasp_reference": "A03:2021 - Injection"
+          }}
+        ],
+        "followed_practices": [
+          {{
+            "practice": "Database Abstraction",
+            "category": "Architecture",
+            "detail": "Using better-sqlite3 which supports parameterized queries"
+          }}
+        ]
+      }}
     }},
     {{
       "scan_id": "SCAN-006",
@@ -69,7 +95,23 @@ Respond ONLY with a JSON object containing an "analyses" array. No text before o
       "data_sensitivity": "HIGH - account balances, but access is properly restricted",
       "attack_scenario": null,
       "false_positive_reason": "Query uses prepared statement with ? placeholder. User ID from verified JWT, not user input.",
-      "confirmed_evidence": null
+      "confirmed_evidence": null,
+      "analysis_reasoning": "This finding is a FALSE POSITIVE because the code already implements the recommended fix. The query uses db.prepare('SELECT ... WHERE user_id = ?').get(req.user.id) which is a parameterized query. Furthermore, the user_id comes from req.user.id which is extracted from a verified JWT token (set by authenticateToken middleware), NOT from user-controlled input. The endpoint is protected by authentication middleware verified in the server.js route registration.",
+      "best_practices_analysis": {{
+        "violated_practices": [],
+        "followed_practices": [
+          {{
+            "practice": "Parameterized Queries",
+            "category": "Input Validation",
+            "detail": "Uses db.prepare() with ? placeholder for SQL parameters"
+          }},
+          {{
+            "practice": "JWT Authentication",
+            "category": "Authentication",
+            "detail": "Route protected by authenticateToken middleware, user ID from verified JWT"
+          }}
+        ]
+      }}
     }}
   ]
 }}
@@ -81,6 +123,8 @@ IMPORTANT:
 - Do NOT add new findings - only analyze the ones provided
 - Base your verdict on the ACTUAL source code, not just the scanner's description
 - The scan_id in your output MUST match the id field from the scanner finding
+- The `analysis_reasoning` must be a detailed 3-5 sentence narrative explaining your reasoning chain
+- The `best_practices_analysis` must list specific security practices that are violated or followed
 """
 
 ANALYZER_USER_PROMPT = """Analyze these scanner findings against the full application source code.
