@@ -1,0 +1,15 @@
+# Ignore for ACR builds
+.git
+.github
+.claude
+.worktrees
+dashboard/node_modules
+dashboard/.next
+docs
+reports
+*.md
+*.png
+*.yml
+nul
+demo-app
+infra
