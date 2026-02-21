@@ -10,8 +10,26 @@ const path = require('path');
 
 const DOCS_DIR = path.join(__dirname, '..', 'uploads', 'documents');
 
-// VULNERABLE: Path Traversal - user input used directly in file path
-// GET /api/documents/download?file=../../../etc/passwd
+// Helper function to validate and sanitize file parameter to prevent path traversal
+function sanitizeFileName(fileName) {
+  // Normalize the path to remove ../ and ./ sequences
+  const normalized = path.normalize(fileName);
+  // Prevent absolute paths
+  if (path.isAbsolute(normalized)) {
+    return null;
+  }
+  // Ensure the normalized path does not escape the DOCS_DIR
+  if (normalized.includes('..') || normalized.startsWith(path.sep)) {
+    return null;
+  }
+  // Only allow filenames without directory separators (optional stricter check)
+  if (normalized.indexOf(path.sep) !== -1) {
+    return null;
+  }
+  return normalized;
+}
+
+// GET /api/documents/download?file=filename
 router.get('/download', (req, res) => {
   const { file } = req.query;
 
@@ -19,15 +37,19 @@ router.get('/download', (req, res) => {
     return res.status(400).json({ error: 'File parameter is required' });
   }
 
-  // VULNERABLE: No path sanitization - attacker can use ../../ to escape
-  const filePath = path.join(DOCS_DIR, file);
+  // FIX: Sanitize and validate 'file' parameter to prevent path traversal
+  const safeFile = sanitizeFileName(file);
+  if (!safeFile) {
+    return res.status(400).json({ error: 'Invalid file parameter' });
+  }
+
+  const filePath = path.join(DOCS_DIR, safeFile);
 
   try {
     if (!fs.existsSync(filePath)) {
       return res.status(404).json({ error: 'Document not found' });
     }
 
-    // Serves any file the process can read, including /etc/passwd, .env, etc.
     res.sendFile(filePath);
   } catch (err) {
     res.status(500).json({ error: 'Failed to retrieve document' });
