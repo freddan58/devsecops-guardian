@@ -46,6 +46,8 @@ export interface ScanSummary {
   compliance_rating: string | null;
   current_stage: string | null;
   error: string | null;
+  parent_scan_id: string | null;
+  scan_number: number;
 }
 
 export interface ScanDetail extends ScanSummary {
@@ -55,6 +57,7 @@ export interface ScanDetail extends ScanSummary {
   risk_profile_output: Record<string, unknown> | null;
   compliance_output: Record<string, unknown> | null;
   stages: Record<string, string>;
+  comparison: ScanComparison | null;
 }
 
 export async function createScan(body: {
@@ -77,6 +80,34 @@ export async function getScan(id: string) {
 }
 
 // Findings
+export interface CodeContext {
+  vulnerable_code: string;
+  related_files: Array<{
+    file: string;
+    relevance: string;
+    snippet: string;
+  }>;
+}
+
+export interface BestPracticeViolation {
+  practice: string;
+  category: string;
+  current_state: string;
+  recommended_state: string;
+  owasp_reference: string;
+}
+
+export interface BestPracticeFollowed {
+  practice: string;
+  category: string;
+  detail: string;
+}
+
+export interface BestPracticesAnalysis {
+  violated_practices: BestPracticeViolation[];
+  followed_practices: BestPracticeFollowed[];
+}
+
 export interface Finding {
   scan_id: string;
   anlz_id: string;
@@ -94,6 +125,19 @@ export interface Finding {
   fix_summary: string | null;
   pr_url: string | null;
   pr_number: number | null;
+  // New fields
+  code_context: CodeContext | null;
+  analysis_reasoning: string;
+  best_practices_analysis: BestPracticesAnalysis | null;
+  fixed_code: string;
+  fix_explanation: string;
+  fix_error: string;
+  auth_context: string;
+  data_sensitivity: string;
+  attack_scenario: string | null;
+  false_positive_reason: string | null;
+  confirmed_evidence: string | null;
+  status_change: string | null;
 }
 
 export interface FindingsResponse {
@@ -174,4 +218,48 @@ export interface ComplianceResponse {
 
 export async function getCompliance(scanId: string) {
   return fetchAPI<ComplianceResponse>(`/api/scans/${scanId}/compliance`);
+}
+
+// Scan Comparison
+export interface ScanComparisonFinding {
+  scan_id: string;
+  vulnerability: string;
+  cwe: string;
+  file: string;
+  severity: string;
+  status_change: string;
+}
+
+export interface ScanComparison {
+  current_scan_id: string;
+  parent_scan_id: string;
+  new_findings: number;
+  resolved_findings: number;
+  persistent_findings: number;
+  regression_findings: number;
+  findings: ScanComparisonFinding[];
+}
+
+// Practices
+export interface PracticesSummary {
+  scan_id: string;
+  total_violations: number;
+  total_followed: number;
+  maturity_score: number;
+  categories: Record<string, { violations: number; followed: number }>;
+  top_violations: BestPracticeViolation[];
+  top_followed: BestPracticeFollowed[];
+  anti_patterns: Array<{
+    practice: string;
+    occurrences: number;
+    category: string;
+  }>;
+}
+
+export async function getScanHistory(scanId: string) {
+  return fetchAPI<ScanSummary[]>(`/api/scans/${scanId}/history`);
+}
+
+export async function getPractices(scanId: string) {
+  return fetchAPI<PracticesSummary>(`/api/scans/${scanId}/practices`);
 }

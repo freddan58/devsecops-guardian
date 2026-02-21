@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import { getFindings, type Finding, type FindingsResponse } from "@/lib/api";
 import { SeverityBadge, VerdictBadge, FixStatusBadge } from "@/components/findings/SeverityBadge";
+import { FindingDetailPanel } from "@/components/findings/FindingDetailPanel";
 
 export default function FindingsPage() {
   const params = useParams();
@@ -14,6 +15,7 @@ export default function FindingsPage() {
   const [error, setError] = useState("");
   const [severityFilter, setSeverityFilter] = useState("");
   const [verdictFilter, setVerdictFilter] = useState("");
+  const [selectedFinding, setSelectedFinding] = useState<Finding | null>(null);
 
   const fetchFindings = useCallback(async () => {
     try {
@@ -112,7 +114,11 @@ export default function FindingsPage() {
           </thead>
           <tbody>
             {data?.findings.map((f, i) => (
-              <tr key={i}>
+              <tr
+                key={i}
+                onClick={() => setSelectedFinding(f)}
+                className="cursor-pointer hover:bg-blue-500/5 transition-colors"
+              >
                 <td><SeverityBadge severity={f.severity} /></td>
                 <td>
                   <div className="font-medium text-white text-sm">{f.vulnerability}</div>
@@ -145,6 +151,7 @@ export default function FindingsPage() {
                         target="_blank"
                         rel="noopener noreferrer"
                         className="text-blue-400 hover:text-blue-300 text-xs"
+                        onClick={(e) => e.stopPropagation()}
                       >
                         PR #{f.pr_number}
                       </a>
@@ -162,6 +169,12 @@ export default function FindingsPage() {
           </div>
         )}
       </div>
+
+      {/* Finding Detail Panel */}
+      <FindingDetailPanel
+        finding={selectedFinding}
+        onClose={() => setSelectedFinding(null)}
+      />
     </div>
   );
 }
