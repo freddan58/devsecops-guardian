@@ -7,8 +7,32 @@ const express = require('express');
 const router = express.Router();
 const http = require('http');
 const https = require('https');
+const { URL } = require('url');
 
-// VULNERABLE: SSRF - user-supplied URL is fetched by the server
+// Define an allowlist of trusted domains for SSRF protection
+const ALLOWED_DOMAINS = [
+  'example.com',
+  'api.example.com',
+  'hooks.example.com'
+];
+
+function isUrlAllowed(inputUrl) {
+  try {
+    const parsedUrl = new URL(inputUrl);
+    // Only allow http or https protocols
+    if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+      return false;
+    }
+    // Check if hostname is in allowlist
+    return ALLOWED_DOMAINS.some(domain => {
+      // Exact match or subdomain match
+      return parsedUrl.hostname === domain || parsedUrl.hostname.endsWith(`.${domain}`);
+    });
+  } catch (e) {
+    return false;
+  }
+}
+
 // POST /api/webhooks/test
 // Body: { "url": "http://169.254.169.254/latest/meta-data/iam/security-credentials/" }
 router.post('/test', async (req, res) => {
@@ -18,10 +42,11 @@ router.post('/test', async (req, res) => {
     return res.status(400).json({ error: 'Webhook URL is required' });
   }
 
-  // VULNERABLE: No URL validation - attacker can target internal services
-  // Can access cloud metadata: http://169.254.169.254/latest/meta-data/
-  // Can scan internal network: http://10.0.0.1:8080/admin
-  // Can access localhost services: http://127.0.0.1:6379/ (Redis)
+  // FIXED: Validate URL against allowlist to prevent SSRF attacks
+  if (!isUrlAllowed(url)) {
+    return res.status(400).json({ error: 'URL is not allowed' });
+  }
+
   try {
     const protocol = url.startsWith('https') ? https : http;
 
@@ -35,7 +60,6 @@ router.post('/test', async (req, res) => {
       request.setTimeout(5000, () => { request.destroy(); reject(new Error('Timeout')); });
     });
 
-    // VULNERABLE: Returning internal service response to the attacker
     res.json({
       success: true,
       webhook_response: {
@@ -51,7 +75,6 @@ router.post('/test', async (req, res) => {
   }
 });
 
-// VULNERABLE: URL fetcher for "link preview" feature
 // GET /api/webhooks/preview?url=http://internal-service:8080/admin
 router.get('/preview', (req, res) => {
   const { url } = req.query;
@@ -60,7 +83,11 @@ router.get('/preview', (req, res) => {
     return res.status(400).json({ error: 'URL parameter required' });
   }
 
-  // VULNERABLE: Fetching arbitrary URLs without blocklist validation
+  // FIXED: Validate URL against allowlist to prevent SSRF attacks
+  if (!isUrlAllowed(url)) {
+    return res.status(400).json({ error: 'URL is not allowed' });
+  }
+
   const protocol = url.startsWith('https') ? https : http;
 
   protocol.get(url, (resp) => {
@@ -73,8 +100,7 @@ router.get('/preview', (req, res) => {
         url: url,
         title: titleMatch ? titleMatch[1] : 'No title',
         status: resp.statusCode,
-        // VULNERABLE: Leaking internal response headers
-        headers: resp.headers,
+        // FIXED: Removed leaking internal response headers to attacker
       });
     });
   }).on('error', (err) => {
