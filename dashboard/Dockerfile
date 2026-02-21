@@ -3,7 +3,7 @@ FROM node:20-alpine AS base
 # Install dependencies
 FROM base AS deps
 WORKDIR /app
-COPY package.json package-lock.json ./
+COPY package.json package-lock.json .npmrc* ./
 RUN npm ci
 
 # Build the application
@@ -16,6 +16,7 @@ COPY . .
 ARG NEXT_PUBLIC_API_URL=http://localhost:8000
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV NO_COLOR=1
 RUN npm run build
 
 # Production image

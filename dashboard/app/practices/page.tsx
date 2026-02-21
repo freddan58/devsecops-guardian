@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { getScans } from "@/lib/api";
+import { listScans } from "@/lib/api";
 
 export default function PracticesRedirect() {
   const router = useRouter();
@@ -11,7 +11,7 @@ export default function PracticesRedirect() {
   useEffect(() => {
     (async () => {
       try {
-        const scans = await getScans();
+        const scans = await listScans();
         const completed = scans.filter((s) => s.status === "COMPLETED");
         if (completed.length > 0) {
           router.replace(`/scans/${completed[0].id}/practices`);
