@@ -1,20 +1,21 @@
 """
 Register all 5 DevSecOps Guardian agents in Foundry Agent Service.
 
+Uses the new Responses API (azure-ai-projects v2) — agents appear in the
+main "Agents" section of Azure AI Foundry portal, NOT under "Classic Agents".
+
+Also registers the GitHub MCP Server as a native MCPTool on the SecurityFixer
+agent, demonstrating Azure MCP integration.
+
 Run once:
     python register_all_agents.py
-
-This registers the agents in the Foundry portal so they appear as managed
-agents in the Azure AI Studio / Foundry UI.
-
-Also registers the GitHub MCP Server as an OpenAPI tool available to
-the SecurityFixer agent for creating branches, PRs, and reading code.
 """
 
 import os
 import sys
 from foundry_client import get_foundry_client, register_agent
-from azure.ai.agents.models import OpenApiTool, OpenApiAnonymousAuthDetails
+from azure.ai.projects.models import MCPTool
+
 
 AGENTS_CONFIG = [
     {
@@ -44,12 +45,14 @@ AGENTS_CONFIG = [
     },
     {
         "name": "SecurityFixer",
-        "description": "Automated remediation code generation agent",
+        "description": "Automated remediation code generation agent with GitHub MCP tools",
         "instructions": (
             "You are a security fixer agent that generates code fixes for confirmed "
             "vulnerabilities. For each confirmed finding, you: read the vulnerable code, "
             "generate a framework-aware fix, create a draft Pull Request on a security/ "
             "branch, and add PR comments explaining the fix rationale.\n\n"
+            "You have access to GitHub MCP tools for reading files, creating branches, "
+            "creating PRs, and posting review comments.\n\n"
             "Output: Fixed code, fix explanation, PR branch name, and fix strategy."
         ),
     },
@@ -78,107 +81,51 @@ AGENTS_CONFIG = [
 ]
 
 
-# GitHub MCP Server OpenAPI spec for Foundry tool registration
+# GitHub MCP Server URL for native MCPTool integration
 MCP_SERVER_URL = os.getenv(
     "MCP_SERVER_URL",
     "https://ca-api-gateway.agreeablesand-6566841b.eastus.azurecontainerapps.io/mcp",
 )
 
-GITHUB_MCP_OPENAPI_SPEC = {
-    "openapi": "3.0.0",
-    "info": {
-        "title": "GitHub MCP Server",
-        "description": "GitHub MCP Server with 9 tools for code reading, PR creation, and review",
-        "version": "1.0.0",
-    },
-    "servers": [{"url": MCP_SERVER_URL}],
-    "paths": {
-        "/tools/github_read_file": {
-            "post": {
-                "operationId": "github_read_file",
-                "summary": "Read a file from GitHub repository",
-                "requestBody": {"content": {"application/json": {"schema": {"type": "object"}}}},
-                "responses": {"200": {"description": "File content"}},
-            }
-        },
-        "/tools/github_list_files": {
-            "post": {
-                "operationId": "github_list_files",
-                "summary": "List files in a repository directory",
-                "requestBody": {"content": {"application/json": {"schema": {"type": "object"}}}},
-                "responses": {"200": {"description": "File listing"}},
-            }
-        },
-        "/tools/github_create_branch": {
-            "post": {
-                "operationId": "github_create_branch",
-                "summary": "Create a new branch in the repository",
-                "requestBody": {"content": {"application/json": {"schema": {"type": "object"}}}},
-                "responses": {"200": {"description": "Branch created"}},
-            }
-        },
-        "/tools/github_create_or_update_file": {
-            "post": {
-                "operationId": "github_create_or_update_file",
-                "summary": "Create or update a file in the repository",
-                "requestBody": {"content": {"application/json": {"schema": {"type": "object"}}}},
-                "responses": {"200": {"description": "File created/updated"}},
-            }
-        },
-        "/tools/github_create_pr": {
-            "post": {
-                "operationId": "github_create_pr",
-                "summary": "Create a Pull Request",
-                "requestBody": {"content": {"application/json": {"schema": {"type": "object"}}}},
-                "responses": {"200": {"description": "PR created"}},
-            }
-        },
-        "/tools/github_post_pr_comment": {
-            "post": {
-                "operationId": "github_post_pr_comment",
-                "summary": "Post a comment on a Pull Request",
-                "requestBody": {"content": {"application/json": {"schema": {"type": "object"}}}},
-                "responses": {"200": {"description": "Comment posted"}},
-            }
-        },
-    },
-}
 
+def _get_mcp_tools():
+    """Create native MCPTool definition for the GitHub MCP Server.
 
-def _get_mcp_tool():
-    """Create OpenAPI tool definition for the GitHub MCP Server."""
-    return OpenApiTool(
-        name="github_mcp_server",
-        description="GitHub MCP Server with tools for reading files, creating branches, PRs, and posting comments",
-        spec=GITHUB_MCP_OPENAPI_SPEC,
-        auth=OpenApiAnonymousAuthDetails(),
-    )
+    Returns a list containing the MCPTool that connects to the
+    GitHub MCP Server deployed as a Remote MCP endpoint.
+    """
+    return [
+        MCPTool(
+            server_label="github_mcp_server",
+            server_url=MCP_SERVER_URL,
+            require_approval="never",
+        )
+    ]
 
 
 def main():
-    print("Connecting to Foundry Agent Service...")
+    print("Connecting to Foundry Agent Service (Responses API v2)...")
     try:
         client = get_foundry_client()
     except Exception as e:
         print(f"Failed to connect to Foundry: {e}")
         sys.exit(1)
 
-    # Build MCP tool definitions for Fixer agent
-    mcp_tool_defs = []
+    # Build MCP tool for SecurityFixer agent
+    mcp_tools = []
     try:
-        mcp_tool = _get_mcp_tool()
-        mcp_tool_defs = mcp_tool.definitions
-        print(f"[OK] GitHub MCP OpenAPI tool definition created ({len(mcp_tool_defs)} definitions)")
+        mcp_tools = _get_mcp_tools()
+        print(f"[OK] GitHub MCP Server tool created (URL: {MCP_SERVER_URL})")
     except Exception as e:
-        print(f"[WARN] Could not create MCP tool definition: {e}")
+        print(f"[WARN] Could not create MCP tool: {e}")
 
-    print("\nRegistering agents in Foundry Agent Service...\n")
+    print("\nRegistering agents in Foundry (Responses API)...\n")
 
     registered = []
     for config in AGENTS_CONFIG:
         try:
             # Attach MCP tools to SecurityFixer agent
-            tools = mcp_tool_defs if config["name"] == "SecurityFixer" and mcp_tool_defs else None
+            tools = mcp_tools if config["name"] == "SecurityFixer" and mcp_tools else None
 
             agent = register_agent(
                 client,
@@ -188,17 +135,18 @@ def main():
                 tools=tools,
             )
             tool_info = " + MCP tools" if tools else ""
-            print(f"  [OK] {config['name']} registered (ID: {agent.id}){tool_info}")
-            registered.append({"name": config["name"], "id": agent.id})
+            print(f"  [OK] {config['name']} registered (Name: {agent.name}){tool_info}")
+            registered.append({"name": config["name"], "agent_name": agent.name})
         except Exception as e:
             print(f"  [FAIL] {config['name']}: {e}")
 
     print(f"\n{len(registered)}/{len(AGENTS_CONFIG)} agents registered successfully!")
     if registered:
-        print("\nAgent IDs:")
+        print("\nAgents (Responses API):")
         for r in registered:
-            print(f"  {r['name']}: {r['id']}")
-        print("\nView them in the Foundry portal: https://ai.azure.com")
+            print(f"  {r['name']}: {r['agent_name']}")
+        print("\nView them in Foundry portal: https://ai.azure.com")
+        print("They should appear in the main 'Agents' section (not Classic).")
 
     return registered
 

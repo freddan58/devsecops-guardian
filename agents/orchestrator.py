@@ -1,14 +1,15 @@
 """
-Multi-Agent Orchestrator using Microsoft Agent Framework (Semantic Kernel).
+Multi-Agent Orchestrator using Microsoft Agent Framework.
 
 Defines the Scanner -> Analyzer -> Fixer -> Risk Profiler -> Compliance
-workflow as a SequentialOrchestration pipeline using agents registered
-in Microsoft Foundry Agent Service.
+workflow as a chained WorkflowBuilder pipeline using agents registered
+in Microsoft Foundry Agent Service (Responses API).
 
 This module demonstrates Microsoft Agent Framework integration:
-- AzureAIAgent: Wraps each Foundry-registered agent as a Semantic Kernel agent
-- SequentialOrchestration: Chains agents in a defined pipeline order
-- CoreRuntime: Manages agent execution and message passing
+- AzureAIClient: Connects to Foundry agents via Responses API
+- Agent: Wraps each client as an executable agent
+- WorkflowBuilder: Chains agents in a sequential pipeline
+- Workflow: Executes the complete pipeline
 
 Usage:
     python orchestrator.py
@@ -22,10 +23,9 @@ import asyncio
 import os
 import sys
 
-from azure.ai.projects.aio import AIProjectClient
-from azure.identity.aio import DefaultAzureCredential
-from semantic_kernel.agents import AzureAIAgent, SequentialOrchestration
-from semantic_kernel.agents.runtime import InProcessRuntime
+from agent_framework import Agent, WorkflowBuilder
+from agent_framework_azure_ai import AzureAIClient
+from azure.identity import DefaultAzureCredential
 
 
 FOUNDRY_ENDPOINT = os.getenv(
@@ -33,6 +33,8 @@ FOUNDRY_ENDPOINT = os.getenv(
     "https://devsecops-guardian-hackaton-etec.services.ai.azure.com"
     "/api/projects/devsecops-guardian-hackaton-etech",
 )
+
+MODEL_DEPLOYMENT = os.getenv("MODEL_DEPLOYMENT", "gpt-4.1-mini")
 
 # Agent names as registered in Foundry (must match register_all_agents.py)
 AGENT_NAMES = [
@@ -44,91 +46,94 @@ AGENT_NAMES = [
 ]
 
 
-async def get_foundry_agents(client: AIProjectClient) -> dict:
-    """Retrieve all registered agents from Foundry by name.
+def create_foundry_agents() -> list[Agent]:
+    """Create Agent Framework agents backed by Foundry-registered agents.
+
+    Each agent connects to its Foundry counterpart via AzureAIClient
+    (Responses API), allowing the WorkflowBuilder to orchestrate them.
 
     Returns:
-        Dict mapping agent name to agent definition object.
+        List of Agent objects ready for workflow chaining.
     """
-    agents_map = {}
-    agent_list = client.agents.list_agents()
-    async for agent in agent_list:
-        if agent.name in AGENT_NAMES:
-            agents_map[agent.name] = agent
-    return agents_map
+    credential = DefaultAzureCredential()
+    agents = []
+
+    for name in AGENT_NAMES:
+        client = AzureAIClient(
+            project_endpoint=FOUNDRY_ENDPOINT,
+            agent_name=name,
+            model_deployment_name=MODEL_DEPLOYMENT,
+            credential=credential,
+        )
+        agent = Agent(
+            client=client,
+            name=name,
+            description=f"DevSecOps Guardian {name} agent",
+        )
+        agents.append(agent)
+        print(f"  [OK] {name} connected via Responses API")
+
+    return agents
+
+
+def build_pipeline(agents: list[Agent]):
+    """Build a sequential workflow pipeline from the agent list.
+
+    Uses WorkflowBuilder.add_chain() to create a linear pipeline:
+    Scanner -> Analyzer -> Fixer -> RiskProfiler -> Compliance
+
+    Args:
+        agents: List of Agent objects in pipeline order.
+
+    Returns:
+        Workflow object ready for execution.
+    """
+    builder = WorkflowBuilder(
+        start_executor=agents[0],
+        name="DevSecOps Guardian Pipeline",
+        description=(
+            "Sequential security pipeline: Scanner detects vulnerabilities, "
+            "Analyzer eliminates false positives, Fixer generates code fixes, "
+            "RiskProfiler scores OWASP risks, ComplianceReporter maps to PCI-DSS 4.0"
+        ),
+        output_executors=[agents[-1]],
+    )
+
+    if len(agents) > 1:
+        builder.add_chain(agents)
+
+    return builder.build()
 
 
 async def run_orchestrated_pipeline(task_description: str):
-    """Execute the DevSecOps Guardian pipeline using Semantic Kernel orchestration.
-
-    Creates AzureAIAgent wrappers for each Foundry agent and chains them
-    in a SequentialOrchestration pipeline.
+    """Execute the DevSecOps Guardian pipeline using Agent Framework orchestration.
 
     Args:
         task_description: Description of the security scan task to execute.
     """
-    credential = DefaultAzureCredential()
-    async with AIProjectClient(
-        endpoint=FOUNDRY_ENDPOINT, credential=credential
-    ) as client:
-        # Retrieve registered agents from Foundry
-        print("Retrieving agents from Foundry Agent Service...")
-        foundry_agents = await get_foundry_agents(client)
+    print("Creating agents from Foundry Agent Service (Responses API)...")
+    agents = create_foundry_agents()
 
-        if len(foundry_agents) < len(AGENT_NAMES):
-            missing = set(AGENT_NAMES) - set(foundry_agents.keys())
-            print(f"WARNING: Missing agents in Foundry: {missing}")
-            print("Run register_all_agents.py first to register all agents.")
+    if not agents:
+        print("ERROR: No agents available. Cannot run pipeline.")
+        return
 
-        # Create Semantic Kernel AzureAIAgent wrappers
-        sk_agents = []
-        for name in AGENT_NAMES:
-            if name in foundry_agents:
-                agent = AzureAIAgent(
-                    client=client,
-                    definition=foundry_agents[name],
-                )
-                sk_agents.append(agent)
-                print(f"  [OK] {name} loaded (ID: {foundry_agents[name].id})")
+    print(f"\nPipeline created with {len(agents)} agents")
+    print(f"Orchestration: {' -> '.join(AGENT_NAMES[:len(agents)])}")
+    print(f"\nTask: {task_description}")
+    print("=" * 60)
 
-        if not sk_agents:
-            print("ERROR: No agents available. Cannot run pipeline.")
-            return
+    workflow = build_pipeline(agents)
 
-        # Build sequential orchestration pipeline
-        pipeline = SequentialOrchestration(
-            members=sk_agents,
-            name="DevSecOps Guardian Pipeline",
-            description=(
-                "Sequential security pipeline: Scanner detects vulnerabilities, "
-                "Analyzer eliminates false positives, Fixer generates code fixes, "
-                "RiskProfiler scores OWASP risks, ComplianceReporter maps to PCI-DSS 4.0"
-            ),
-        )
+    result = await workflow.run(message=task_description)
+    print("\n" + "=" * 60)
+    print("Pipeline completed!")
+    print(f"Result: {result}")
 
-        print(f"\nPipeline created with {len(sk_agents)} agents")
-        print(f"Orchestration: {' -> '.join(AGENT_NAMES[:len(sk_agents)])}")
-        print(f"\nTask: {task_description}")
-        print("=" * 60)
-
-        # Execute the orchestration
-        runtime = InProcessRuntime()
-        runtime.start()
-
-        try:
-            result = await pipeline.invoke(
-                task=task_description,
-                runtime=runtime,
-            )
-            print("\n" + "=" * 60)
-            print("Pipeline completed!")
-            print(f"Result: {result.value}")
-        finally:
-            await runtime.stop_when_idle()
-
-        # Cleanup: delete agent threads (not the agents themselves)
-        for agent in sk_agents:
-            await agent.client.agents.delete_agent(agent.id)
+    # Cleanup clients
+    for agent in agents:
+        if hasattr(agent, 'client') and hasattr(agent.client, 'close'):
+            agent.client.close()
 
 
 async def main():

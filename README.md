@@ -2,7 +2,7 @@
   <img src="https://img.shields.io/badge/Microsoft%20AI%20Dev%20Days-2026-blue?style=for-the-badge&logo=microsoft" alt="Microsoft AI Dev Days 2026"/>
   <img src="https://img.shields.io/badge/Track-Agentic%20DevOps-purple?style=for-the-badge" alt="Agentic DevOps"/>
   <img src="https://img.shields.io/badge/Azure%20OpenAI-Foundry-orange?style=for-the-badge&logo=microsoftazure" alt="Azure OpenAI"/>
-  <img src="https://img.shields.io/badge/Semantic%20Kernel-Agent%20Framework-green?style=for-the-badge" alt="Semantic Kernel"/>
+  <img src="https://img.shields.io/badge/Agent%20Framework-Orchestration-green?style=for-the-badge" alt="Agent Framework"/>
 </p>
 
 # DevSecOps Guardian
@@ -52,62 +52,74 @@ Code Push --> Scanner --> Analyzer --> Fixer --> Risk Profiler --> Compliance
 
 | Technology | How We Use It | Implementation |
 |-----------|---------------|----------------|
-| **Microsoft Foundry Agent Service** | All 5 agents registered and managed in Foundry via `azure-ai-projects` SDK | `agents/foundry_client.py`, `agents/register_all_agents.py` |
-| **Microsoft Agent Framework (Semantic Kernel)** | Sequential multi-agent orchestration pipeline with `AzureAIAgent` + `SequentialOrchestration` | `agents/orchestrator.py` |
-| **Azure MCP Server** | Custom GitHub MCP Server (9 tools) registered as OpenAPI tool in Foundry for agent-tool integration | `mcp-servers/github/server.py`, `mcp-servers/github/foundry_adapter.py` |
+| **Microsoft Foundry Agent Service** | All 5 agents registered via Responses API (`azure-ai-projects` v2 SDK) — visible in main Agents section | `agents/foundry_client.py`, `agents/register_all_agents.py` |
+| **Microsoft Agent Framework** | Sequential multi-agent orchestration pipeline with `Agent` + `WorkflowBuilder` from `agent-framework` SDK | `agents/orchestrator.py` |
+| **Azure MCP Server** | Custom GitHub MCP Server (9 tools) registered as native `MCPTool` in Foundry for agent-tool integration | `mcp-servers/github/server.py`, `mcp-servers/github/foundry_adapter.py` |
 | **GitHub Copilot Agent Mode** | Remediation Accelerator: auto-creates GitHub Issues for Copilot Coding Agent + custom instructions | `agents/fixer/issue_creator.py`, `.github/copilot-instructions.md` |
 
 ---
 
 ## Microsoft Foundry Integration
 
-All 5 agents are registered in Microsoft Foundry Agent Service using the official `azure-ai-projects` SDK:
+All 5 agents are registered in Microsoft Foundry Agent Service using the **Responses API** (`azure-ai-projects` v2 SDK, `PromptAgentDefinition`). Agents appear in the main **Agents** section of the Azure AI Foundry portal (not Classic Agents):
 
-| Agent | Foundry ID | Description |
-|-------|-----------|-------------|
-| **SecurityScanner** | `asst_KnceRAxudXPQpTeOiptKR2Zb` | LLM-based code vulnerability detection |
-| **VulnerabilityAnalyzer** | `asst_YvaVawNl8Cj6YSUkLFfHAGby` | Contextual false positive elimination |
-| **SecurityFixer** | `asst_1x3JmFOEznGxCVMXHsqq3efR` | Automated remediation + MCP tools |
-| **RiskProfiler** | `asst_07vpKe5VaY553DpoN8UiSfsX` | OWASP Top 10 risk assessment |
-| **ComplianceReporter** | `asst_B5rblPVl3R0CWE8HxERLa4lt` | PCI-DSS 4.0 audit report generation |
+| Agent | Kind | Model | Description |
+|-------|------|-------|-------------|
+| **SecurityScanner** | `prompt` | `gpt-4.1-mini` | LLM-based code vulnerability detection |
+| **VulnerabilityAnalyzer** | `prompt` | `gpt-4.1-mini` | Contextual false positive elimination |
+| **SecurityFixer** | `prompt` | `gpt-4.1-mini` | Automated remediation + native MCP tools |
+| **RiskProfiler** | `prompt` | `gpt-4.1-mini` | OWASP Top 10 risk assessment |
+| **ComplianceReporter** | `prompt` | `gpt-4.1-mini` | PCI-DSS 4.0 audit report generation |
 
 **Foundry Endpoint**: `https://devsecops-guardian-hackaton-etec.services.ai.azure.com`
 
 ```python
-# agents/foundry_client.py
+# agents/foundry_client.py — Responses API (v2)
 from azure.ai.projects import AIProjectClient
+from azure.ai.projects.models import PromptAgentDefinition
 from azure.identity import DefaultAzureCredential
 
 client = AIProjectClient(endpoint=FOUNDRY_ENDPOINT, credential=DefaultAzureCredential())
-agent = client.agents.create_agent(model="gpt-4.1-mini", name="SecurityScanner", ...)
+agent = client.agents.create(
+    name="SecurityScanner",
+    definition=PromptAgentDefinition(model="gpt-4.1-mini", instructions="..."),
+)
+
+# Execute via Responses API
+openai_client = client.get_openai_client()
+response = openai_client.responses.create(...)
 ```
 
 ---
 
 ## Microsoft Agent Framework
 
-Pipeline orchestration uses **Semantic Kernel** with `AzureAIAgent` and `SequentialOrchestration`:
+Pipeline orchestration uses the **Microsoft Agent Framework** (`agent-framework` SDK) with `AzureAIClient` and `WorkflowBuilder`:
 
-- **5 AzureAIAgent instances**: Each wraps a Foundry-registered agent as a Semantic Kernel agent
-- **Sequential workflow graph**: Scanner --> Analyzer --> Fixer --> Risk Profiler --> Compliance
+- **5 Agent instances**: Each connects to a Foundry-registered agent via `AzureAIClient` (Responses API)
+- **Sequential workflow chain**: Scanner --> Analyzer --> Fixer --> Risk Profiler --> Compliance
 - **State management**: Findings state passed between agents with full context
-- **MCP tool integration**: SecurityFixer agent has GitHub MCP tools registered for code operations
+- **Native MCP tool integration**: SecurityFixer agent has GitHub MCP tools registered as native `MCPTool`
 - **Human-in-the-loop**: Fixer creates Draft PRs requiring human approval before merge
 
 ```python
-# agents/orchestrator.py
-from semantic_kernel.agents import AzureAIAgent, SequentialOrchestration
-from semantic_kernel.agents.runtime import InProcessRuntime
+# agents/orchestrator.py — Microsoft Agent Framework
+from agent_framework import Agent, WorkflowBuilder
+from agent_framework_azure_ai import AzureAIClient
 
-pipeline = SequentialOrchestration(members=[scanner, analyzer, fixer, profiler, compliance])
-result = await pipeline.invoke(task="Scan for vulnerabilities", runtime=InProcessRuntime())
+client = AzureAIClient(project_endpoint=FOUNDRY_ENDPOINT, agent_name="SecurityScanner", ...)
+scanner = Agent(client=client, name="SecurityScanner")
+
+workflow = WorkflowBuilder(start_executor=scanner, output_executors=[compliance])
+workflow.add_chain([scanner, analyzer, fixer, profiler, compliance])
+result = await workflow.build().run(message="Scan for vulnerabilities")
 ```
 
 ---
 
 ## Azure MCP Integration
 
-Custom GitHub MCP Server with **9 tools** registered in Foundry Agent Service as an OpenAPI tool:
+Custom GitHub MCP Server with **9 tools** registered in Foundry Agent Service as a **native `MCPTool`** (Responses API):
 
 **Read Tools** (used by Scanner + Analyzer):
 - `github_read_file` — Read source code files from repositories
@@ -306,7 +318,7 @@ npm run dev
 
 ```bash
 # Install SDK
-pip install azure-ai-projects azure-identity
+pip install "azure-ai-projects>=2.0.0b3" azure-identity "agent-framework[azure-ai]"
 
 # Register all 5 agents
 cd agents
@@ -365,7 +377,7 @@ The pipeline (`azure-pipelines.yml`) has **8 stages** split into two tracks:
 | Auto-fix | Limited languages | Version bumps | **Full code rewrites as draft PRs** |
 | Risk profiling | No | No | **OWASP Top 10 risk score per service** |
 | Compliance reporting | No | No | **PCI-DSS 4.0 audit-ready reports** |
-| Multi-agent orchestration | Single tool | Single bot | **5 agents via Foundry + Semantic Kernel** |
+| Multi-agent orchestration | Single tool | Single bot | **5 agents via Foundry + Agent Framework** |
 | Business logic understanding | Pattern matching | None | **LLM understands domain context** |
 | Copilot integration | N/A | N/A | **Auto-creates Issues for Copilot Agent** |
 
@@ -384,7 +396,7 @@ devsecops-guardian/
 |   |-- compliance/           # Agent 5: PCI-DSS compliance auditor
 |   |-- foundry_client.py     # Foundry Agent Service SDK wrapper
 |   |-- register_all_agents.py # Register agents in Foundry
-|   +-- orchestrator.py       # Semantic Kernel orchestration pipeline
+|   +-- orchestrator.py       # Agent Framework orchestration pipeline
 |-- api/                      # FastAPI backend (gateway + pipeline runner)
 |-- dashboard/                # Next.js frontend (React, TypeScript, Tailwind)
 |-- demo-app/                 # Vulnerable banking API (12 planted vulns)
@@ -405,8 +417,8 @@ devsecops-guardian/
 
 | Layer | Technology |
 |-------|-----------|
-| **Agent Service** | Microsoft Foundry Agent Service (`azure-ai-projects` SDK) |
-| **Agent Framework** | Semantic Kernel (`AzureAIAgent`, `SequentialOrchestration`) |
+| **Agent Service** | Microsoft Foundry Agent Service (`azure-ai-projects` v2, Responses API) |
+| **Agent Framework** | Microsoft Agent Framework (`Agent`, `WorkflowBuilder`, `AzureAIClient`) |
 | **LLM** | Azure OpenAI (gpt-4.1-mini) via Foundry |
 | **MCP** | Custom GitHub MCP Server (FastMCP, 9 tools, registered in Foundry) |
 | **Copilot** | GitHub Copilot Agent Mode (issue creator + custom instructions) |
