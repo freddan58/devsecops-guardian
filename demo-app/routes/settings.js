@@ -12,9 +12,10 @@ const userPreferences = {};
 // VULNERABLE: Deep merge without prototype pollution protection
 function deepMerge(target, source) {
   for (const key in source) {
-    // VULNERABLE: No check for __proto__, constructor, or prototype keys
-    // Attacker sends: { "__proto__": { "isAdmin": true } }
-    // This pollutes Object.prototype, making ALL objects have isAdmin = true
+    // FIXED: Ignore prototype pollution keys to prevent Object.prototype pollution
+    if (key === '__proto__' || key === 'constructor' || key === 'prototype') {
+      continue;
+    }
     if (typeof source[key] === 'object' && source[key] !== null && !Array.isArray(source[key])) {
       if (!target[key]) target[key] = {};
       deepMerge(target[key], source[key]);
@@ -55,13 +56,13 @@ router.get('/preferences', (req, res) => {
   res.json({ preferences: prefs });
 });
 
-// VULNERABLE: Admin check relies on object property that can be polluted
+// FIXED: Admin check uses explicit boolean check to avoid prototype pollution bypass
 // GET /api/settings/admin/config
 router.get('/admin/config', (req, res) => {
   const user = { name: req.headers['x-user-name'] || 'guest' };
 
-  // VULNERABLE: After prototype pollution, user.isAdmin will be true for ANY user
-  if (!user.isAdmin) {
+  // FIXED: Explicitly check own property to prevent prototype pollution bypass
+  if (!Object.prototype.hasOwnProperty.call(user, 'isAdmin') || user.isAdmin !== true) {
     return res.status(403).json({ error: 'Admin access required' });
   }
 
