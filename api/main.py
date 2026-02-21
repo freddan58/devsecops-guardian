@@ -27,7 +27,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from config import CORS_ORIGINS, REPORTS_DIR
-from routers import health, scans, findings, compliance, risk_profile
+from routers import health, scans, findings, compliance, risk_profile, practices
 
 # Create FastAPI app
 app = FastAPI(
@@ -59,6 +59,7 @@ app.include_router(scans.router)
 app.include_router(findings.router)
 app.include_router(compliance.router)
 app.include_router(risk_profile.router)
+app.include_router(practices.router)
 
 
 @app.on_event("startup")

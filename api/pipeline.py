@@ -70,6 +70,75 @@ async def run_agent(
         return -1, str(e)
 
 
+def _make_finding_key(finding: dict) -> str:
+    """Create a match key for comparing findings across scans."""
+    cwe = finding.get("cwe", "")
+    file = finding.get("file", "")
+    line = finding.get("line", 0)
+    line_bucket = (line // 10) * 10
+    return f"{cwe}:{file}:{line_bucket}"
+
+
+def _compare_scans(parent: ScanRecord, current: ScanRecord) -> dict:
+    """Compare findings between parent and current scan."""
+    parent_findings = {}
+    if parent.analyzer_output:
+        for f in parent.analyzer_output.get("findings", []):
+            if f.get("verdict") == "CONFIRMED":
+                key = _make_finding_key(f)
+                parent_findings[key] = f
+
+    current_findings = {}
+    if current.analyzer_output:
+        for f in current.analyzer_output.get("findings", []):
+            if f.get("verdict") == "CONFIRMED":
+                key = _make_finding_key(f)
+                current_findings[key] = f
+
+    comparison_findings = []
+    new_count = 0
+    resolved_count = 0
+    persistent_count = 0
+
+    for key, finding in current_findings.items():
+        if key in parent_findings:
+            status_change = "PERSISTENT"
+            persistent_count += 1
+        else:
+            status_change = "NEW"
+            new_count += 1
+        comparison_findings.append({
+            "scan_id": finding.get("scan_id", ""),
+            "vulnerability": finding.get("vulnerability", ""),
+            "cwe": finding.get("cwe", ""),
+            "file": finding.get("file", ""),
+            "severity": finding.get("severity", ""),
+            "status_change": status_change,
+        })
+
+    for key, finding in parent_findings.items():
+        if key not in current_findings:
+            resolved_count += 1
+            comparison_findings.append({
+                "scan_id": finding.get("scan_id", ""),
+                "vulnerability": finding.get("vulnerability", ""),
+                "cwe": finding.get("cwe", ""),
+                "file": finding.get("file", ""),
+                "severity": finding.get("severity", ""),
+                "status_change": "RESOLVED",
+            })
+
+    return {
+        "current_scan_id": current.id,
+        "parent_scan_id": parent.id,
+        "new_findings": new_count,
+        "resolved_findings": resolved_count,
+        "persistent_findings": persistent_count,
+        "regression_findings": 0,
+        "findings": comparison_findings,
+    }
+
+
 async def run_pipeline(scan: ScanRecord):
     """Execute the full agent pipeline for a scan.
 
@@ -216,6 +285,16 @@ async def run_pipeline(scan: ScanRecord):
     else:
         scan.set_stage("compliance", "completed")
         scan.load_output("compliance", compliance_json)
+
+    # ---- COMPARISON (if re-scan) ----
+    if scan.parent_scan_id:
+        parent = scan_store.get(scan.parent_scan_id)
+        if parent and parent.analyzer_output:
+            comparison = _compare_scans(parent, scan)
+            scan.comparison = comparison
+            print(f"  [>] Re-scan comparison: {comparison.get('new_findings', 0)} new, "
+                  f"{comparison.get('resolved_findings', 0)} resolved, "
+                  f"{comparison.get('persistent_findings', 0)} persistent")
 
     # ---- DONE ----
     scan.update_status(ScanStatus.COMPLETED)
