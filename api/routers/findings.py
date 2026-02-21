@@ -40,11 +40,56 @@ async def get_findings(
         for fix in scan.fixer_output["fixes"]:
             fixer_lookup[fix.get("scan_id", "")] = fix
 
-    # Merge analyzer findings with fixer results
+    # Build scanner lookup: scan_id -> scanner finding (for code_context)
+    scanner_lookup = {}
+    if scan.scanner_output and scan.scanner_output.get("findings"):
+        for sf in scan.scanner_output["findings"]:
+            scanner_lookup[sf.get("id", "")] = sf
+
+    # Build compliance lookup: scan_id -> compliance mappings
+    compliance_lookup = {}
+    if scan.compliance_output and scan.compliance_output.get("findings"):
+        for cf in scan.compliance_output["findings"]:
+            compliance_lookup[cf.get("scan_id", "")] = cf
+
+    # Merge analyzer findings with scanner, fixer, and compliance data
     findings = []
     for f in scan.analyzer_output.get("findings", []):
         scan_ref = f.get("scan_id", "")
         fix = fixer_lookup.get(scan_ref, {})
+        scanner_finding = scanner_lookup.get(scan_ref, {})
+        compliance_finding = compliance_lookup.get(scan_ref, {})
+
+        # Build code_context from scanner output
+        raw_code_context = scanner_finding.get("code_context")
+        code_context = None
+        if raw_code_context and isinstance(raw_code_context, dict):
+            from schemas import CodeContext
+            code_context = CodeContext(
+                vulnerable_code=raw_code_context.get("vulnerable_code", ""),
+                related_files=raw_code_context.get("related_files", []),
+            )
+
+        # Build best_practices_analysis from analyzer output
+        raw_bp = f.get("best_practices_analysis")
+        best_practices = None
+        if raw_bp and isinstance(raw_bp, dict):
+            from schemas import BestPracticesAnalysis, BestPracticeViolation, BestPracticeFollowed
+            best_practices = BestPracticesAnalysis(
+                violated_practices=[
+                    BestPracticeViolation(**v) for v in raw_bp.get("violated_practices", [])
+                    if isinstance(v, dict)
+                ],
+                followed_practices=[
+                    BestPracticeFollowed(**fp) for fp in raw_bp.get("followed_practices", [])
+                    if isinstance(fp, dict)
+                ],
+            )
+
+        # Determine fix_status with FIX_GENERATED support
+        fix_status = fix.get("status", "PENDING")
+        if fix_status == "PARTIAL":
+            fix_status = "FIX_GENERATED"
 
         finding = Finding(
             scan_id=scan_ref,
@@ -59,10 +104,23 @@ async def get_findings(
             recommendation=f.get("recommendation", ""),
             verdict=f.get("verdict", "CONFIRMED"),
             exploitability_score=f.get("exploitability_score", 0),
-            fix_status=fix.get("status", "PENDING"),
+            fix_status=fix_status,
             fix_summary=fix.get("fix_summary"),
             pr_url=fix.get("pr_url"),
             pr_number=fix.get("pr_number"),
+            # New Feature 1 fields
+            code_context=code_context,
+            analysis_reasoning=f.get("analysis_reasoning", ""),
+            best_practices_analysis=best_practices,
+            fixed_code=fix.get("fixed_code", ""),
+            fix_explanation=fix.get("fix_explanation", ""),
+            fix_error=fix.get("fix_error", fix.get("error", "")),
+            # Analyzer enrichment
+            auth_context=f.get("auth_context", ""),
+            data_sensitivity=f.get("data_sensitivity", ""),
+            attack_scenario=f.get("attack_scenario"),
+            false_positive_reason=f.get("false_positive_reason"),
+            confirmed_evidence=f.get("confirmed_evidence"),
         )
 
         # Apply filters
