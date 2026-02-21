@@ -150,6 +150,9 @@ async def process_finding(finding: dict, ref: str = None, dry_run: bool = False)
         "vulnerability": vuln,
         "status": "FAILED",
         "fix_summary": "",
+        "fixed_code": "",
+        "fix_explanation": "",
+        "fix_error": "",
         "branch": "",
         "pr_number": None,
         "pr_url": "",
@@ -173,14 +176,16 @@ async def process_finding(finding: dict, ref: str = None, dry_run: bool = False)
         print(f"  [2/5] Generating fix with LLM...")
         fix = await generate_fix(finding, source_code)
         if not fix or not fix.get("fixed_code"):
+            result["fix_error"] = "LLM failed to generate fix code"
             result["error"] = "LLM failed to generate fix"
             return result
 
         result["fix_summary"] = fix.get("fix_summary", "")
+        result["fixed_code"] = fix.get("fixed_code", "")
+        result["fix_explanation"] = fix.get("fix_details", "")
 
         if dry_run:
             result["status"] = "DRY_RUN"
-            result["fix_details"] = fix.get("fix_details", "")
             print(f"  [DRY RUN] Fix generated but not pushed to GitHub")
             return result
 
@@ -228,8 +233,8 @@ async def process_finding(finding: dict, ref: str = None, dry_run: bool = False)
             print(f"  [5/5] PR #{result['pr_number']}: {result['pr_url']}")
         else:
             # Fix was committed but PR creation failed
-            result["status"] = "PARTIAL"
-            result["error"] = "Fix committed but PR creation failed"
+            result["status"] = "FIX_GENERATED"
+            result["fix_error"] = "Fix code generated and committed but PR creation failed"
 
         return result
 
@@ -257,6 +262,8 @@ def print_results(results: list[dict]):
             icon = "[~]"
         elif status == "PARTIAL":
             icon = "[!]"
+        elif status == "FIX_GENERATED":
+            icon = "[~]"
         else:
             icon = "[!!]"
 
@@ -276,6 +283,7 @@ def print_results(results: list[dict]):
     success = sum(1 for r in results if r["status"] == "SUCCESS")
     dry_run = sum(1 for r in results if r["status"] == "DRY_RUN")
     partial = sum(1 for r in results if r["status"] == "PARTIAL")
+    fix_generated = sum(1 for r in results if r["status"] == "FIX_GENERATED")
     failed = sum(1 for r in results if r["status"] == "FAILED")
 
     parts = []
@@ -285,6 +293,8 @@ def print_results(results: list[dict]):
         parts.append(f"{dry_run} DRY_RUN")
     if partial:
         parts.append(f"{partial} PARTIAL")
+    if fix_generated:
+        parts.append(f"{fix_generated} FIX_GENERATED")
     if failed:
         parts.append(f"{failed} FAILED")
 
