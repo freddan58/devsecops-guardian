@@ -9,6 +9,7 @@ const { getDatabase } = require('../config/database');
 const { authenticateToken } = require('../middleware/auth');
 const crypto = require('crypto');
 const http = require('http');
+const https = require('https');
 
 // VULN #32: Second-Order SQL Injection (CWE-89)
 // Data stored safely but used unsafely when building dynamic reports
@@ -95,11 +96,11 @@ router.post('/send-report', authenticateToken, (req, res) => {
 });
 
 // VULN #35: Insecure HTTP request to internal service (CWE-319)
-// Using HTTP instead of HTTPS for sensitive data transfer
+// Using HTTPS instead of HTTP for sensitive data transfer
 router.post('/sync-external', authenticateToken, (req, res) => {
   const { report_data } = req.body;
 
-  // Sending sensitive financial data over unencrypted HTTP
+  // Sending sensitive financial data over encrypted HTTPS
   const postData = JSON.stringify({
     api_key: STRIPE_SECRET,
     data: report_data,
@@ -108,26 +109,26 @@ router.post('/sync-external', authenticateToken, (req, res) => {
 
   const options = {
     hostname: 'internal-api.company.com',
-    port: 80,                          // HTTP, not HTTPS!
+    port: 443,                          // Changed to HTTPS port
     path: '/api/v1/reports/sync',
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${STRIPE_SECRET}`,  // Secret in plaintext over HTTP
+      'Authorization': `Bearer ${STRIPE_SECRET}`,  // Secret now sent over HTTPS connection
     },
   };
 
-  // Using http (not https) module
-  const httpReq = http.request(options, (httpRes) => {
-    res.json({ message: 'Report synced', status: httpRes.statusCode });
+  // Use https module to ensure encrypted transport
+  const httpsReq = https.request(options, (httpsRes) => {
+    res.json({ message: 'Report synced', status: httpsRes.statusCode });
   });
 
-  httpReq.on('error', () => {
+  httpsReq.on('error', () => {
     res.json({ message: 'Sync queued (external service unavailable)' });
   });
 
-  httpReq.write(postData);
-  httpReq.end();
+  httpsReq.write(postData);
+  httpsReq.end();
 });
 
 module.exports = router;
