@@ -13,17 +13,30 @@ const { authenticateToken } = require('../middleware/auth');
 // Attacker can set { "role": "admin" } to escalate privileges
 router.put('/users/:id', authenticateToken, (req, res) => {
   const { id } = req.params;
-  const updates = req.body; // No field filtering!
+  const updates = req.body;
+
+  // SECURITY FIX: Implement whitelist of allowed fields to prevent mass assignment
+  const allowedFields = ['name', 'email', 'phone', 'address'];
+  const filteredUpdates = {};
+  for (const key of allowedFields) {
+    if (updates.hasOwnProperty(key)) {
+      filteredUpdates[key] = updates[key];
+    }
+  }
+
+  if (Object.keys(filteredUpdates).length === 0) {
+    return res.status(400).json({ error: 'No valid fields to update' });
+  }
 
   try {
     const db = getDatabase();
-    const fields = Object.keys(updates).map(k => `${k} = ?`).join(', ');
-    const values = Object.values(updates);
+    const fields = Object.keys(filteredUpdates).map(k => `${k} = ?`).join(', ');
+    const values = Object.values(filteredUpdates);
 
-    // Directly builds SQL from user-controlled field names - also SQL injection via column names
+    // Use parameterized query with fixed column names to prevent SQL injection and mass assignment
     db.prepare(`UPDATE users SET ${fields} WHERE id = ?`).run(...values, id);
 
-    res.json({ message: 'User updated', updated_fields: Object.keys(updates) });
+    res.json({ message: 'User updated', updated_fields: Object.keys(filteredUpdates) });
   } catch (err) {
     res.status(500).json({ error: 'Update failed', details: err.message });
   }
