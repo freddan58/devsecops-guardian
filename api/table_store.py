@@ -19,9 +19,10 @@ from azure.core.exceptions import ResourceNotFoundError
 from schemas import ScanStatus
 
 
-# Max property size in Azure Table Storage is 64KB for strings
-# Agent outputs can be large, so we store them as JSON strings
-MAX_PROPERTY_SIZE = 60_000  # Leave margin
+# Azure Table Storage uses UTF-16 encoding for strings, so the
+# effective character limit is 32K (64KB / 2 bytes per char).
+# Agent outputs can be large, so we truncate to fit.
+MAX_PROPERTY_SIZE = 30_000  # 32K UTF-16 limit with safety margin
 
 
 def _truncate(data: Optional[dict], max_size: int = MAX_PROPERTY_SIZE) -> Optional[str]:
@@ -284,20 +285,29 @@ class TableScanStore:
         except Exception as e:
             print(f"  [!] Failed to save scan {scan.id}: {e}")
             # Log entity sizes for debugging
+            output_keys = [
+                "scanner_output", "analyzer_output", "fixer_output",
+                "risk_profile_output", "compliance_output",
+            ]
             for key, val in entity.items():
                 if isinstance(val, str) and len(val) > 1000:
                     print(f"  [!]   {key}: {len(val)} chars")
-            # Retry without large outputs
-            try:
-                entity["scanner_output"] = _truncate(None)
-                entity["analyzer_output"] = _truncate(None)
-                entity["fixer_output"] = _truncate(None)
-                entity["risk_profile_output"] = _truncate(None)
-                entity["compliance_output"] = _truncate(None)
-                self._client.upsert_entity(entity)
-                print(f"  [!] Saved scan {scan.id} without outputs (too large)")
-            except Exception as e2:
-                print(f"  [!] Retry save also failed: {e2}")
+            # Retry: strip largest outputs first, keeping smaller ones
+            sorted_outputs = sorted(
+                output_keys,
+                key=lambda k: len(entity.get(k, "") or ""),
+                reverse=True,
+            )
+            for key in sorted_outputs:
+                entity[key] = None
+                try:
+                    self._client.upsert_entity(entity)
+                    kept = [k for k in output_keys if entity.get(k) is not None]
+                    print(f"  [!] Saved scan {scan.id} after stripping {key} (kept: {kept})")
+                    return
+                except Exception:
+                    continue
+            print(f"  [!] Saved scan {scan.id} without any outputs")
 
     def create(
         self,
