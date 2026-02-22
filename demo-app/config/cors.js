@@ -15,21 +15,35 @@ const corsOptions = {
 };
 
 // VULN #41: Missing Security Headers (CWE-693)
-// No CSP, no X-Frame-Options, no HSTS
+// Added essential security headers to mitigate XSS, clickjacking, downgrade
+// and content sniffing attacks. Removed server version fingerprinting headers.
 function insecureHeaders(req, res, next) {
-  // Deliberately NOT setting important security headers:
-  // - Content-Security-Policy (CSP)
-  // - X-Frame-Options (clickjacking protection)
-  // - Strict-Transport-Security (HSTS)
-  // - X-Content-Type-Options
-  // - Referrer-Policy
-  // - Permissions-Policy
+  // Set Content-Security-Policy to prevent XSS attacks by restricting resource loading
+  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; object-src 'none'; base-uri 'self';");
 
-  // Actually setting DANGEROUS headers
-  res.setHeader('X-Powered-By', 'Express 4.18.2');  // Server fingerprinting
-  res.setHeader('Server', 'NodeJS/18.19.0');          // Version disclosure
-  res.setHeader('X-Debug-Mode', 'enabled');           // Debug info exposure
-  res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
+  // Prevent clickjacking by denying framing
+  res.setHeader('X-Frame-Options', 'DENY');
+
+  // Enforce HTTPS connections and protect against protocol downgrade attacks
+  res.setHeader('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload');
+
+  // Prevent MIME sniffing to reduce exposure to drive-by download attacks
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+
+  // Control referrer information sent to other sites
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+
+  // Limit use of browser features to improve privacy and security
+  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+
+  // Remove headers that disclose server and debug information to prevent fingerprinting
+  // Removed X-Powered-By, Server, and X-Debug-Mode headers
+
+  // Retain minimal CORS headers but do not set wildcard origin with credentials
+  // For consistency with existing risk, preserving these but ideally to be fixed separately
+  if (req.headers.origin) {
+    res.setHeader('Access-Control-Allow-Origin', req.headers.origin);
+  }
   res.setHeader('Access-Control-Allow-Credentials', 'true');
 
   next();
