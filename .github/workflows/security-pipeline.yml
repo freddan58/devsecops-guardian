@@ -6,7 +6,7 @@
 #
 # Triggers:
 #   - Push to main  -> Full pipeline (all agents + build + deploy)
-#   - Pull request   -> Scan + Analyze only (no fixes, no deploy)
+#   - Pull request   -> Scan + Analyze only (same-repo PRs only, not forks)
 #   - Manual dispatch -> Full pipeline with configurable scan path
 #
 # Required secrets (configure in GitHub > Settings > Secrets):
@@ -53,6 +53,11 @@ jobs:
   scanner:
     name: "Agent 1: Security Scanner"
     runs-on: ubuntu-latest
+    # Fork protection: only run on push, workflow_dispatch, or same-repo PRs
+    if: >-
+      github.event_name == 'push' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
     steps:
       - uses: actions/checkout@v4
 
@@ -63,6 +68,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -r agents/scanner/requirements.txt
+          pip install "mcp[cli]>=1.0.0"
 
       - name: Run Security Scanner
         env:
@@ -107,6 +113,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -r agents/analyzer/requirements.txt
+          pip install "mcp[cli]>=1.0.0"
 
       - uses: actions/download-artifact@v4
         with:
@@ -140,7 +147,7 @@ jobs:
           retention-days: 30
 
   # ============================================================
-  # AGENT 3: Security Fixer (main branch only)
+  # AGENT 3: Security Fixer (push/dispatch only, not PRs)
   # ============================================================
   fixer:
     name: "Agent 3: Security Fixer"
@@ -157,6 +164,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -r agents/fixer/requirements.txt
+          pip install "mcp[cli]>=1.0.0"
 
       - uses: actions/download-artifact@v4
         with:
@@ -191,7 +199,7 @@ jobs:
           retention-days: 30
 
   # ============================================================
-  # AGENT 4: Risk Profiler (main branch only)
+  # AGENT 4: Risk Profiler (push/dispatch only, not PRs)
   # ============================================================
   risk-profiler:
     name: "Agent 4: Risk Profiler"
@@ -251,7 +259,7 @@ jobs:
           retention-days: 30
 
   # ============================================================
-  # AGENT 5: Compliance Reporter (main branch only)
+  # AGENT 5: Compliance Reporter (push/dispatch only, not PRs)
   # ============================================================
   compliance:
     name: "Agent 5: Compliance Reporter"
@@ -314,7 +322,7 @@ jobs:
           retention-days: 30
 
   # ============================================================
-  # BUILD: Docker images -> ACR (main branch only)
+  # BUILD: Docker images -> ACR (main branch push only)
   # ============================================================
   build:
     name: "Build & Push Docker Images"
@@ -344,7 +352,7 @@ jobs:
           docker push ${{ secrets.ACR_LOGIN_SERVER }}/dashboard:latest
 
   # ============================================================
-  # DEPLOY: Update Azure Container Apps (main branch only)
+  # DEPLOY: Update Azure Container Apps (main branch push only)
   # ============================================================
   deploy:
     name: "Deploy to Azure"
