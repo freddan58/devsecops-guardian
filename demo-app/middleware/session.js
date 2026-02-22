@@ -6,15 +6,11 @@
 const crypto = require('crypto');
 
 // VULN #36: Predictable Session ID Generation (CWE-330)
-// Sequential counter + timestamp = easily guessable session IDs
-let sessionCounter = 0;
-
+// FIXED: Use cryptographically secure random bytes for session ID generation
 function generateSessionId(userId) {
-  sessionCounter++;
-  // Predictable: counter + userId + truncated timestamp
-  // An attacker can enumerate valid sessions
-  const raw = `${sessionCounter}-${userId}-${Date.now().toString().slice(-6)}`;
-  return Buffer.from(raw).toString('base64');
+  // Generate 32 bytes (256 bits) of cryptographically secure random data
+  // and encode as hex string for session ID
+  return crypto.randomBytes(32).toString('hex');
 }
 
 // VULN #37: In-Memory Session Store Without Size Limit (CWE-400)
