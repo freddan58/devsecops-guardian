@@ -5,15 +5,12 @@
 
 const crypto = require('crypto');
 
-// VULN #36: Predictable Session ID Generation (CWE-330)
-// Sequential counter + timestamp = easily guessable session IDs
-let sessionCounter = 0;
-
+// FIXED #36: Use cryptographically secure random values for session IDs
 function generateSessionId(userId) {
-  sessionCounter++;
-  // Predictable: counter + userId + truncated timestamp
-  // An attacker can enumerate valid sessions
-  const raw = `${sessionCounter}-${userId}-${Date.now().toString().slice(-6)}`;
+  // Generate 16 bytes (128 bits) of cryptographically secure random data
+  const randomBytes = crypto.randomBytes(16).toString('hex');
+  // Combine with userId for session identification, but do not rely on this for entropy
+  const raw = `${randomBytes}-${userId}`;
   return Buffer.from(raw).toString('base64');
 }
 
