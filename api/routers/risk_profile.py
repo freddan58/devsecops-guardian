@@ -4,12 +4,38 @@ DevSecOps Guardian - Risk Profile Router
 OWASP Top 10 risk profile data.
 """
 
+import json
+import os
+
 from fastapi import APIRouter, HTTPException
 
+from config import REPORTS_DIR
 from models import scan_store
 from schemas import RiskProfileResponse, OWASPCategory
 
 router = APIRouter(prefix="/api/scans", tags=["risk-profile"])
+
+
+def _load_from_disk(scan_id: str, filename: str) -> dict | None:
+    """Load agent output from disk when Table Storage data is truncated."""
+    path = os.path.join(REPORTS_DIR, scan_id, filename)
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            pass
+    return None
+
+
+def _get_output(scan, attr: str, disk_filename: str) -> dict | None:
+    """Get agent output, falling back to disk if Table Storage data is truncated."""
+    data = getattr(scan, attr, None)
+    if data and data.get("_truncated"):
+        disk_data = _load_from_disk(scan.id, disk_filename)
+        if disk_data:
+            return disk_data
+    return data
 
 
 # OWASP Top 10 2021 categories
@@ -41,8 +67,9 @@ async def get_risk_profile(scan_id: str):
         raise HTTPException(status_code=404, detail=f"Scan {scan_id} not found")
 
     # If risk profiler agent output is available, use it directly
-    if scan.risk_profile_output:
-        data = scan.risk_profile_output
+    risk_data = _get_output(scan, "risk_profile_output", "risk-profile-output.json")
+    if risk_data:
+        data = risk_data
         owasp = []
         raw_owasp = data.get("owasp_top_10", [])
 
@@ -81,13 +108,14 @@ async def get_risk_profile(scan_id: str):
         )
 
     # Fallback: generate basic risk profile from analyzer findings
-    if not scan.analyzer_output:
+    analyzer_data = _get_output(scan, "analyzer_output", "analyzer-output.json")
+    if not analyzer_data:
         raise HTTPException(
             status_code=400,
             detail="No risk profile or analyzer data available yet"
         )
 
-    return _generate_basic_profile(scan_id, scan.analyzer_output)
+    return _generate_basic_profile(scan_id, analyzer_data)
 
 
 def _generate_basic_profile(

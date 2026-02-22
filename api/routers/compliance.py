@@ -4,8 +4,12 @@ DevSecOps Guardian - Compliance Router
 PCI-DSS 4.0 compliance assessment data.
 """
 
+import json
+import os
+
 from fastapi import APIRouter, HTTPException
 
+from config import REPORTS_DIR
 from models import scan_store
 from schemas import (
     ComplianceResponse,
@@ -14,6 +18,28 @@ from schemas import (
 )
 
 router = APIRouter(prefix="/api/scans", tags=["compliance"])
+
+
+def _load_from_disk(scan_id: str, filename: str) -> dict | None:
+    """Load agent output from disk when Table Storage data is truncated."""
+    path = os.path.join(REPORTS_DIR, scan_id, filename)
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            pass
+    return None
+
+
+def _get_output(scan, attr: str, disk_filename: str) -> dict | None:
+    """Get agent output, falling back to disk if Table Storage data is truncated."""
+    data = getattr(scan, attr, None)
+    if data and data.get("_truncated"):
+        disk_data = _load_from_disk(scan.id, disk_filename)
+        if disk_data:
+            return disk_data
+    return data
 
 
 @router.get("/{scan_id}/compliance", response_model=ComplianceResponse)
@@ -27,13 +53,12 @@ async def get_compliance(scan_id: str):
     if not scan:
         raise HTTPException(status_code=404, detail=f"Scan {scan_id} not found")
 
-    if not scan.compliance_output:
+    data = _get_output(scan, "compliance_output", "compliance-output.json")
+    if not data:
         raise HTTPException(
             status_code=400,
             detail="Compliance assessment has not completed yet"
         )
-
-    data = scan.compliance_output
 
     # Parse compliance findings
     findings = []

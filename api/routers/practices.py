@@ -4,13 +4,39 @@ DevSecOps Guardian - Best Practices Router
 Aggregates best_practices_analysis from all findings into a maturity score.
 """
 
+import json
+import os
+
 from fastapi import APIRouter, HTTPException
 from typing import Any
 
+from config import REPORTS_DIR
 from models import scan_store
 from schemas import PracticesSummary
 
 router = APIRouter(prefix="/api/scans", tags=["practices"])
+
+
+def _load_from_disk(scan_id: str, filename: str) -> dict | None:
+    """Load agent output from disk when Table Storage data is truncated."""
+    path = os.path.join(REPORTS_DIR, scan_id, filename)
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            pass
+    return None
+
+
+def _get_output(scan, attr: str, disk_filename: str) -> dict | None:
+    """Get agent output, falling back to disk if Table Storage data is truncated."""
+    data = getattr(scan, attr, None)
+    if data and data.get("_truncated"):
+        disk_data = _load_from_disk(scan.id, disk_filename)
+        if disk_data:
+            return disk_data
+    return data
 
 
 def _compute_maturity_score(
@@ -31,7 +57,8 @@ async def get_practices(scan_id: str):
     if not scan:
         raise HTTPException(status_code=404, detail=f"Scan {scan_id} not found")
 
-    if not scan.analyzer_output:
+    analyzer_data = _get_output(scan, "analyzer_output", "analyzer-output.json")
+    if not analyzer_data:
         raise HTTPException(
             status_code=400,
             detail="Analyzer has not completed yet"
@@ -41,7 +68,7 @@ async def get_practices(scan_id: str):
     all_followed: list[dict] = []
     category_stats: dict[str, dict[str, int]] = {}
 
-    for f in scan.analyzer_output.get("findings", []):
+    for f in analyzer_data.get("findings", []):
         bp = f.get("best_practices_analysis", {})
         if not isinstance(bp, dict):
             continue

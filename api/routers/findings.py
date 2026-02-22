@@ -4,13 +4,39 @@ DevSecOps Guardian - Findings Router
 Merged view of analyzer findings + fixer results.
 """
 
+import json
+import os
+
 from fastapi import APIRouter, HTTPException, Query
 from typing import Optional
 
+from config import REPORTS_DIR
 from models import scan_store
 from schemas import Finding, FindingsResponse
 
 router = APIRouter(prefix="/api/scans", tags=["findings"])
+
+
+def _load_from_disk(scan_id: str, filename: str) -> dict | None:
+    """Load agent output from disk when Table Storage data is truncated."""
+    path = os.path.join(REPORTS_DIR, scan_id, filename)
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            pass
+    return None
+
+
+def _get_output(scan, attr: str, disk_filename: str) -> dict | None:
+    """Get agent output, falling back to disk if Table Storage data is truncated."""
+    data = getattr(scan, attr, None)
+    if data and data.get("_truncated"):
+        disk_data = _load_from_disk(scan.id, disk_filename)
+        if disk_data:
+            return disk_data
+    return data
 
 
 @router.get("/{scan_id}/findings", response_model=FindingsResponse)
@@ -28,7 +54,13 @@ async def get_findings(
     if not scan:
         raise HTTPException(status_code=404, detail=f"Scan {scan_id} not found")
 
-    if not scan.analyzer_output:
+    # Load outputs with disk fallback for truncated Table Storage data
+    analyzer_output = _get_output(scan, "analyzer_output", "analyzer-output.json")
+    scanner_output = _get_output(scan, "scanner_output", "scanner-output.json")
+    fixer_output = _get_output(scan, "fixer_output", "fixer-output.json")
+    compliance_output = _get_output(scan, "compliance_output", "compliance-output.json")
+
+    if not analyzer_output:
         raise HTTPException(
             status_code=400,
             detail="Analyzer has not completed yet"
@@ -36,25 +68,25 @@ async def get_findings(
 
     # Build fixer lookup: scan_id -> fix info
     fixer_lookup = {}
-    if scan.fixer_output and scan.fixer_output.get("fixes"):
-        for fix in scan.fixer_output["fixes"]:
+    if fixer_output and fixer_output.get("fixes"):
+        for fix in fixer_output["fixes"]:
             fixer_lookup[fix.get("scan_id", "")] = fix
 
     # Build scanner lookup: scan_id -> scanner finding (for code_context)
     scanner_lookup = {}
-    if scan.scanner_output and scan.scanner_output.get("findings"):
-        for sf in scan.scanner_output["findings"]:
+    if scanner_output and scanner_output.get("findings"):
+        for sf in scanner_output["findings"]:
             scanner_lookup[sf.get("id", "")] = sf
 
     # Build compliance lookup: scan_id -> compliance mappings
     compliance_lookup = {}
-    if scan.compliance_output and scan.compliance_output.get("findings"):
-        for cf in scan.compliance_output["findings"]:
+    if compliance_output and compliance_output.get("findings"):
+        for cf in compliance_output["findings"]:
             compliance_lookup[cf.get("scan_id", "")] = cf
 
     # Merge analyzer findings with scanner, fixer, and compliance data
     findings = []
-    for f in scan.analyzer_output.get("findings", []):
+    for f in analyzer_output.get("findings", []):
         scan_ref = f.get("scan_id", "")
         fix = fixer_lookup.get(scan_ref, {})
         scanner_finding = scanner_lookup.get(scan_ref, {})
