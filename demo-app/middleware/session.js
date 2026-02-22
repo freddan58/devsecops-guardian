@@ -38,17 +38,13 @@ function createSession(userId, userData) {
   return sessionId;
 }
 
-// VULN #38: Session Fixation (CWE-384)
-// Accepts pre-defined session IDs from client without regeneration
+// FIXED VULN #38: Session Fixation (CWE-384)
+// Removed creation of new sessions from arbitrary client-supplied session IDs
+// Now validateSession only returns existing sessions or null if not found
 function validateSession(sessionId) {
-  // If session doesn't exist, create it (session fixation!)
-  // Attacker sets session cookie, victim authenticates, attacker has valid session
+  // Do NOT create new session if sessionId does not exist to prevent session fixation
   if (!sessions[sessionId]) {
-    sessions[sessionId] = {
-      userId: null,
-      data: {},
-      created: Date.now(),
-    };
+    return null;
   }
   return sessions[sessionId];
 }
