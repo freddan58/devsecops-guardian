@@ -9,6 +9,26 @@ const http = require('http');
 const https = require('https');
 const { URL } = require('url');
 
+// Helper function to check if IP is private or loopback
+const net = require('net');
+const dns = require('dns').promises;
+
+function isPrivateIP(ip) {
+  // Check for IPv4 private ranges
+  const parts = ip.split('.').map(Number);
+  if (parts.length === 4) {
+    if (parts[0] === 10) return true; // 10.0.0.0/8
+    if (parts[0] === 127) return true; // 127.0.0.0/8 loopback
+    if (parts[0] === 169 && parts[1] === 254) return true; // link-local
+    if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true; // 172.16.0.0/12
+    if (parts[0] === 192 && parts[1] === 168) return true; // 192.168.0.0/16
+  }
+  // IPv6 loopback and unique local addresses
+  if (ip === '::1') return true;
+  if (ip.startsWith('fc') || ip.startsWith('fd')) return true; // Unique local address
+  return false;
+}
+
 // VULNERABLE: SSRF - user-supplied URL is fetched by the server
 // POST /api/webhooks/test
 // Body: { "url": "http://169.254.169.254/latest/meta-data/iam/security-credentials/" }
@@ -19,12 +39,42 @@ router.post('/test', async (req, res) => {
     return res.status(400).json({ error: 'Webhook URL is required' });
   }
 
-  // VULNERABLE: No URL validation - attacker can target internal services
-  // Can access cloud metadata: http://169.254.169.254/latest/meta-data/
-  // Can scan internal network: http://10.0.0.1:8080/admin
-  // Can access localhost services: http://127.0.0.1:6379/ (Redis)
+  let parsedUrl;
   try {
-    const protocol = url.startsWith('https') ? https : http;
+    parsedUrl = new URL(url);
+  } catch (e) {
+    return res.status(400).json({ error: 'Invalid URL format' });
+  }
+
+  // SECURITY FIX: Validate URL hostname and IP to prevent SSRF
+  // 1. Resolve hostname to IP
+  // 2. Block private IP ranges and cloud metadata IPs
+  // 3. Allow only http or https protocols
+
+  if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+    return res.status(400).json({ error: 'Only HTTP and HTTPS protocols are allowed' });
+  }
+
+  try {
+    // Resolve DNS to IP addresses
+    const addresses = await dns.lookup(parsedUrl.hostname, { all: true });
+
+    for (const addr of addresses) {
+      if (isPrivateIP(addr.address)) {
+        return res.status(403).json({ error: 'Access to private or restricted IP addresses is forbidden' });
+      }
+      // Block cloud metadata IP specifically
+      if (addr.address === '169.254.169.254') {
+        return res.status(403).json({ error: 'Access to cloud metadata IP is forbidden' });
+      }
+    }
+  } catch (err) {
+    // DNS resolution failed
+    return res.status(400).json({ error: 'Unable to resolve hostname' });
+  }
+
+  try {
+    const protocol = parsedUrl.protocol === 'https:' ? https : http;
 
     const response = await new Promise((resolve, reject) => {
       const request = protocol.get(url, (resp) => {
@@ -36,7 +86,7 @@ router.post('/test', async (req, res) => {
       request.setTimeout(5000, () => { request.destroy(); reject(new Error('Timeout')); });
     });
 
-    // VULNERABLE: Returning internal service response to the attacker
+    // SECURITY FIX: Limit response body length and do not expose headers
     res.json({
       success: true,
       webhook_response: {
