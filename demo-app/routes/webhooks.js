@@ -7,8 +7,84 @@ const express = require('express');
 const router = express.Router();
 const http = require('http');
 const https = require('https');
+const dns = require('dns').promises;
+const net = require('net');
 
-// VULNERABLE: SSRF - user-supplied URL is fetched by the server
+// Helper function to check if IP is private or loopback
+function isPrivateIp(ip) {
+  // IPv4 private ranges
+  const privateRanges = [
+    ['10.0.0.0', '10.255.255.255'],
+    ['172.16.0.0', '172.31.255.255'],
+    ['192.168.0.0', '192.168.255.255'],
+    ['127.0.0.0', '127.255.255.255'], // loopback
+    ['169.254.0.0', '169.254.255.255'], // link-local
+  ];
+
+  const ipNum = ipToNumber(ip);
+  for (const [start, end] of privateRanges) {
+    if (ipNum >= ipToNumber(start) && ipNum <= ipToNumber(end)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function ipToNumber(ip) {
+  return ip.split('.').reduce((acc, octet) => (acc << 8) + parseInt(octet, 10), 0) >>> 0;
+}
+
+// Allowlist of trusted domains (example)
+const allowedDomains = [
+  'example.com',
+  'api.example.com',
+  'trusted-webhook.com'
+];
+
+// Validate URL and enforce allowlist and block internal IPs
+async function validateUrl(userUrl) {
+  let parsedUrl;
+  try {
+    parsedUrl = new URL(userUrl);
+  } catch (e) {
+    throw new Error('Invalid URL format');
+  }
+
+  // Enforce protocol
+  if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+    throw new Error('Only HTTP and HTTPS protocols are allowed');
+  }
+
+  // Check domain against allowlist
+  const hostname = parsedUrl.hostname.toLowerCase();
+  const domainAllowed = allowedDomains.some(domain => {
+    return hostname === domain || hostname.endsWith('.' + domain);
+  });
+  if (!domainAllowed) {
+    throw new Error('Domain is not in the allowlist');
+  }
+
+  // Resolve DNS to IPs and check for private IPs
+  let addresses;
+  try {
+    addresses = await dns.lookup(hostname, { all: true });
+  } catch (err) {
+    throw new Error('DNS lookup failed');
+  }
+
+  for (const addr of addresses) {
+    if (net.isIP(addr.address)) {
+      if (isPrivateIp(addr.address)) {
+        throw new Error('IP address is in a private or restricted range');
+      }
+    } else {
+      throw new Error('Resolved address is not a valid IP');
+    }
+  }
+
+  return parsedUrl.toString();
+}
+
 // POST /api/webhooks/test
 // Body: { "url": "http://169.254.169.254/latest/meta-data/iam/security-credentials/" }
 router.post('/test', async (req, res) => {
@@ -18,15 +94,14 @@ router.post('/test', async (req, res) => {
     return res.status(400).json({ error: 'Webhook URL is required' });
   }
 
-  // VULNERABLE: No URL validation - attacker can target internal services
-  // Can access cloud metadata: http://169.254.169.254/latest/meta-data/
-  // Can scan internal network: http://10.0.0.1:8080/admin
-  // Can access localhost services: http://127.0.0.1:6379/ (Redis)
   try {
-    const protocol = url.startsWith('https') ? https : http;
+    // SECURITY FIX: Validate URL against allowlist and block internal IPs to prevent SSRF
+    const safeUrl = await validateUrl(url);
+
+    const protocol = safeUrl.startsWith('https') ? https : http;
 
     const response = await new Promise((resolve, reject) => {
-      const request = protocol.get(url, (resp) => {
+      const request = protocol.get(safeUrl, (resp) => {
         let data = '';
         resp.on('data', chunk => data += chunk);
         resp.on('end', () => resolve({ status: resp.statusCode, body: data }));
@@ -35,7 +110,6 @@ router.post('/test', async (req, res) => {
       request.setTimeout(5000, () => { request.destroy(); reject(new Error('Timeout')); });
     });
 
-    // VULNERABLE: Returning internal service response to the attacker
     res.json({
       success: true,
       webhook_response: {
