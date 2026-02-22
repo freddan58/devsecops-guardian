@@ -5,11 +5,19 @@
 const Database = require('better-sqlite3');
 const path = require('path');
 
-// FIXED: Credentials loaded from environment variables
+// FIXED: Fail fast if required secrets are missing instead of defaulting to empty strings
+const API_KEY = process.env.API_KEY;
+const DB_SECRET = process.env.DB_SECRET;
+const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY;
+
+if (!API_KEY || !DB_SECRET || !ENCRYPTION_KEY) {
+  throw new Error('Missing required environment variables: API_KEY, DB_SECRET, and ENCRYPTION_KEY must be set');
+}
+
 const DB_CONFIG = {
-  API_KEY: process.env.API_KEY || '',
-  DB_SECRET: process.env.DB_SECRET || '',
-  ENCRYPTION_KEY: process.env.ENCRYPTION_KEY || ''
+  API_KEY,
+  DB_SECRET,
+  ENCRYPTION_KEY
 };
 
 const DB_PATH = path.join(__dirname, '..', 'banking.db');
