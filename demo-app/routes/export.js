@@ -6,6 +6,7 @@
 const express = require('express');
 const router = express.Router();
 const { execSync } = require('child_process');
+const mustache = require('mustache');
 
 // VULNERABLE: Using eval() for "flexible" query parsing
 // POST /api/export/query
@@ -62,7 +63,7 @@ router.get('/pdf', (req, res) => {
   }
 });
 
-// VULNERABLE: Template injection via user-controlled template string
+// FIXED: Replaced unsafe new Function() with safe Mustache templating engine
 // POST /api/export/custom
 router.post('/custom', (req, res) => {
   const { template, data } = req.body;
@@ -72,10 +73,8 @@ router.post('/custom', (req, res) => {
   }
 
   try {
-    // VULNERABLE: new Function() with user input - Code execution
-    // Attacker: { "template": "return process.env.DATABASE_URL" }
-    const renderer = new Function('data', template);
-    const result = renderer(data || {});
+    // SECURITY FIX: Avoid executing user-supplied code by using Mustache for safe templating
+    const result = mustache.render(template, data || {});
 
     res.json({ rendered: result });
   } catch (err) {
