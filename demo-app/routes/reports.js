@@ -41,13 +41,11 @@ router.get('/generate', authenticateToken, (req, res) => {
 router.post('/password-reset', (req, res) => {
   const { email } = req.body;
 
-  // Using MD5 (broken) + predictable input (email + timestamp)
-  const timestamp = Date.now().toString();
-  const resetToken = crypto.createHash('md5')
-    .update(email + timestamp)
-    .digest('hex');
+  // FIXED: Replaced MD5 with secure random token generator
+  // Using crypto.randomBytes to generate cryptographically secure tokens
+  const resetToken = crypto.randomBytes(32).toString('hex');
 
-  // Token is just MD5(email + timestamp) - easily brute-forced
+  // Token is now securely random and unpredictable
   // Also storing in DB without hashing the token itself
   const db = getDatabase();
   try {
