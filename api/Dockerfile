@@ -34,6 +34,9 @@ RUN mkdir -p /app/reports
 
 WORKDIR /app/api
 
+# Ensure pipeline logs appear in container logs immediately
+ENV PYTHONUNBUFFERED=1
+
 EXPOSE 8000
 
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
