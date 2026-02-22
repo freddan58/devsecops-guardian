@@ -10,6 +10,16 @@ const path = require('path');
 
 const DOCS_DIR = path.join(__dirname, '..', 'uploads', 'documents');
 
+// Helper function to prevent path traversal by ensuring resolved path is within DOCS_DIR
+function safeJoin(base, target) {
+  const targetPath = path.resolve(base, target);
+  if (!targetPath.startsWith(base + path.sep)) {
+    // Path traversal attempt detected
+    return null;
+  }
+  return targetPath;
+}
+
 // VULNERABLE: Path Traversal - user input used directly in file path
 // GET /api/documents/download?file=../../../etc/passwd
 router.get('/download', (req, res) => {
@@ -19,15 +29,18 @@ router.get('/download', (req, res) => {
     return res.status(400).json({ error: 'File parameter is required' });
   }
 
-  // VULNERABLE: No path sanitization - attacker can use ../../ to escape
-  const filePath = path.join(DOCS_DIR, file);
+  // FIX: Use safeJoin to prevent path traversal by validating resolved path
+  const filePath = safeJoin(DOCS_DIR, file);
+  if (!filePath) {
+    return res.status(400).json({ error: 'Invalid file path' });
+  }
 
   try {
     if (!fs.existsSync(filePath)) {
       return res.status(404).json({ error: 'Document not found' });
     }
 
-    // Serves any file the process can read, including /etc/passwd, .env, etc.
+    // Serves only files within DOCS_DIR
     res.sendFile(filePath);
   } catch (err) {
     res.status(500).json({ error: 'Failed to retrieve document' });
@@ -42,7 +55,11 @@ router.get('/preview', (req, res) => {
     return res.status(400).json({ error: 'File parameter is required' });
   }
 
-  const filePath = path.join(DOCS_DIR, file);
+  // FIX: Use safeJoin to prevent path traversal by validating resolved path
+  const filePath = safeJoin(DOCS_DIR, file);
+  if (!filePath) {
+    return res.status(400).json({ error: 'Invalid file path' });
+  }
 
   try {
     const content = fs.readFileSync(filePath, 'utf-8');
