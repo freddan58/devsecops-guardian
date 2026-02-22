@@ -18,21 +18,28 @@ router.post('/send', authenticateToken, async (req, res) => {
   try {
     const db = getDatabase();
 
-    // Step 1: Check balance (Time Of Check)
-    const sender = db.prepare('SELECT balance FROM accounts WHERE owner_id = ?').get(from_user);
-    if (!sender || sender.balance < amount) {
-      return res.status(400).json({ error: 'Insufficient funds' });
-    }
+    // Use a transaction to ensure atomicity and prevent race conditions
+    const transaction = db.transaction(() => {
+      // Step 1: Check available balance
+      const sender = db.prepare('SELECT balance FROM accounts WHERE owner_id = ?').get(from_user);
+      if (!sender || sender.balance < amount) {
+        throw new Error('Insufficient funds');
+      }
 
-    // Simulated processing delay - widens the race window
-    await new Promise(resolve => setTimeout(resolve, 100));
+      // Step 2: Deduct funds from sender
+      db.prepare('UPDATE accounts SET balance = balance - ? WHERE owner_id = ?').run(amount, from_user);
 
-    // Step 2: Deduct (Time Of Use) - no transaction, no lock
-    db.prepare('UPDATE accounts SET balance = balance - ? WHERE owner_id = ?').run(amount, from_user);
-    db.prepare('UPDATE accounts SET balance = balance + ? WHERE account_number = ?').run(amount, to_account);
+      // Step 3: Add funds to receiver
+      db.prepare('UPDATE accounts SET balance = balance + ? WHERE account_number = ?').run(amount, to_account);
+    });
+
+    transaction();
 
     res.json({ message: 'Payment sent', amount, to: to_account });
   } catch (err) {
+    if (err.message === 'Insufficient funds') {
+      return res.status(400).json({ error: err.message });
+    }
     res.status(500).json({ error: 'Payment failed', details: err.message });
   }
 });
