@@ -6,6 +6,7 @@
 const express = require('express');
 const router = express.Router();
 const { execSync } = require('child_process');
+const ejs = require('ejs');
 
 // VULNERABLE: Using eval() for "flexible" query parsing
 // POST /api/export/query
@@ -62,7 +63,7 @@ router.get('/pdf', (req, res) => {
   }
 });
 
-// VULNERABLE: Template injection via user-controlled template string
+// FIXED: Template injection via user-controlled template string
 // POST /api/export/custom
 router.post('/custom', (req, res) => {
   const { template, data } = req.body;
@@ -72,12 +73,14 @@ router.post('/custom', (req, res) => {
   }
 
   try {
-    // VULNERABLE: new Function() with user input - Code execution
-    // Attacker: { "template": "return process.env.DATABASE_URL" }
-    const renderer = new Function('data', template);
-    const result = renderer(data || {});
-
-    res.json({ rendered: result });
+    // FIX: Use EJS templating engine to safely render user templates with escaping
+    // This prevents arbitrary code execution by not using new Function()
+    ejs.render(template, data || {}, {}, (err, str) => {
+      if (err) {
+        return res.status(400).json({ error: `Template error: ${err.message}` });
+      }
+      res.json({ rendered: str });
+    });
   } catch (err) {
     res.status(400).json({ error: `Template error: ${err.message}` });
   }
