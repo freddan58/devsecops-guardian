@@ -26,26 +26,78 @@ MAX_PROPERTY_SIZE = 30_000  # 32K UTF-16 limit with safety margin
 
 
 def _truncate(data: Optional[dict], max_size: int = MAX_PROPERTY_SIZE) -> Optional[str]:
-    """Serialize dict to JSON string, truncating if too large."""
+    """Serialize dict to JSON string, truncating if too large.
+
+    For fixer output, preserves slim fix metadata (PR URLs, status)
+    while stripping large fields (fixed_code, fix_explanation).
+    """
     if data is None:
         return None
     s = json.dumps(data, ensure_ascii=False)
-    if len(s) > max_size:
-        # Store a marker that it was truncated + keep summary data
-        summary = {
-            "_truncated": True,
-            "_original_size": len(s),
-            "total_findings": data.get("total_findings"),
-            "confirmed_count": data.get("confirmed_count"),
-            "success_count": data.get("success_count"),
-            "overall_risk_score": data.get("overall_risk_score"),
-            "risk_level": data.get("risk_level"),
-            "overall_risk_rating": data.get("overall_risk_rating"),
-        }
-        # Remove None values
-        summary = {k: v for k, v in summary.items() if v is not None}
-        return json.dumps(summary, ensure_ascii=False)
-    return s
+    if len(s) <= max_size:
+        return s
+
+    # Build summary with scalar fields
+    summary = {
+        "_truncated": True,
+        "_original_size": len(s),
+        "total_findings": data.get("total_findings"),
+        "confirmed_count": data.get("confirmed_count"),
+        "success_count": data.get("success_count"),
+        "overall_risk_score": data.get("overall_risk_score"),
+        "risk_level": data.get("risk_level"),
+        "overall_risk_rating": data.get("overall_risk_rating"),
+    }
+
+    # For fixer output: preserve slim fix metadata (PR URLs, status, summary)
+    # Strip large fields (fixed_code, fix_explanation) that cause truncation
+    if data.get("fixes"):
+        slim_fixes = []
+        for fix in data["fixes"]:
+            slim_fixes.append({
+                "scan_id": fix.get("scan_id", ""),
+                "anlz_id": fix.get("anlz_id", ""),
+                "file": fix.get("file", ""),
+                "vulnerability": fix.get("vulnerability", ""),
+                "status": fix.get("status", ""),
+                "fix_summary": fix.get("fix_summary", ""),
+                "pr_url": fix.get("pr_url"),
+                "pr_number": fix.get("pr_number"),
+                "branch": fix.get("branch", ""),
+                "fix_error": fix.get("fix_error", ""),
+                "error": fix.get("error", ""),
+            })
+        summary["fixes"] = slim_fixes
+
+    # For analyzer output: preserve slim findings metadata
+    if data.get("findings") and not data.get("fixes"):
+        slim_findings = []
+        for f in data["findings"]:
+            slim_findings.append({
+                "scan_id": f.get("scan_id", ""),
+                "anlz_id": f.get("anlz_id", ""),
+                "file": f.get("file", ""),
+                "line": f.get("line", 0),
+                "vulnerability": f.get("vulnerability", ""),
+                "cwe": f.get("cwe", ""),
+                "severity": f.get("severity", ""),
+                "verdict": f.get("verdict", ""),
+                "description": f.get("description", "")[:200],
+                "recommendation": f.get("recommendation", "")[:200],
+            })
+        summary["findings"] = slim_findings
+
+    # Remove None values from top-level scalars
+    summary = {k: v for k, v in summary.items() if v is not None}
+
+    # Final size check — if still too large, drop findings/fixes
+    result = json.dumps(summary, ensure_ascii=False)
+    if len(result) > max_size:
+        summary.pop("fixes", None)
+        summary.pop("findings", None)
+        result = json.dumps(summary, ensure_ascii=False)
+
+    return result
 
 
 def _parse_json(s: Optional[str]) -> Optional[dict]:
