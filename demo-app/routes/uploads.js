@@ -50,26 +50,18 @@ router.post('/avatar', authenticateToken, (req, res) => {
 router.post('/import-xml', authenticateToken, (req, res) => {
   const xmlData = req.body.xml;
 
-  // Directly passes user XML to parser without sanitization
-  // An attacker can inject: <!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>
+  // FIX: Disable external entity resolution by not processing external entities manually
+  // and by not reading files based on XML entities to prevent XXE attacks
   try {
-    // Using regex to extract data - but the XML is still processed unsafely
-    // The real vulnerability is that we'd pass this to an XML parser
+    // Extract <name> and <amount> tags safely without resolving external entities
     const nameMatch = xmlData.match(/<name>(.*?)<\/name>/);
     const amountMatch = xmlData.match(/<amount>(.*?)<\/amount>/);
 
-    // Simulating XML parser that resolves entities
-    let processed = xmlData;
-    const entityMatch = xmlData.match(/<!ENTITY\s+(\w+)\s+SYSTEM\s+"(.+?)">/);
-    if (entityMatch) {
-      const entityName = entityMatch[1];
-      const entityPath = entityMatch[2];
-      // DANGEROUS: Reading file system based on XML entity
-      try {
-        const content = fs.readFileSync(entityPath, 'utf-8');
-        processed = processed.replace(new RegExp(`&${entityName};`, 'g'), content);
-      } catch (e) { /* file not found */ }
-    }
+    // Remove any DOCTYPE declarations to prevent external entity definitions
+    const sanitizedXml = xmlData.replace(/<!DOCTYPE[^>]*>/g, '');
+
+    // Do not process external entities manually
+    const processed = sanitizedXml;
 
     res.json({
       parsed: { name: nameMatch?.[1], amount: amountMatch?.[1] },
