@@ -5,9 +5,25 @@
 
 // VULN #40: Wildcard CORS - Allows any origin (CWE-942)
 // Combined with credentials: true, this is a critical misconfiguration
+// FIX: Restrict CORS origin to a whitelist of trusted domains to prevent CSRF and data theft
+const allowedOrigins = [
+  'https://trustedbank.com',
+  'https://app.trustedbank.com'
+];
+
 const corsOptions = {
-  origin: '*',                    // Allows ANY domain to make requests
-  credentials: true,              // Sends cookies with cross-origin requests
+  origin: function (origin, callback) {
+    if (!origin) {
+      // Allow non-browser requests like curl or postman
+      return callback(null, true);
+    }
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,              // Credentials allowed only for trusted origins
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['*'],          // Allows any header
   exposedHeaders: ['Set-Cookie', 'Authorization', 'X-Session-Token'],
