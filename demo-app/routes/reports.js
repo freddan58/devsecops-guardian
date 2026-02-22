@@ -18,18 +18,21 @@ router.get('/generate', authenticateToken, (req, res) => {
   try {
     const db = getDatabase();
 
-    // sort_by comes from user and is injected directly into ORDER BY clause
-    // Attacker: sort_by=1; DROP TABLE users; --
+    // FIX: Validate 'sort_by' against whitelist to prevent SQL Injection in ORDER BY
+    const allowedSortFields = ['t.id', 't.amount', 't.created_at', 'a.owner_name', 'a.account_number'];
+    const orderBy = allowedSortFields.includes(sort_by) ? sort_by : 't.created_at';
+
+    // Use parameterized queries for safety
     const query = `
       SELECT t.*, a.owner_name, a.account_number
       FROM transactions t
       JOIN accounts a ON t.account_id = a.id
-      WHERE t.type = '${report_type}'
-      AND t.created_at BETWEEN '${date_from}' AND '${date_to}'
-      ORDER BY ${sort_by}
+      WHERE t.type = ?
+      AND t.created_at BETWEEN ? AND ?
+      ORDER BY ${orderBy}
     `;
 
-    const results = db.prepare(query).all();
+    const results = db.prepare(query).all(report_type, date_from, date_to);
     res.json({ report: report_type, data: results, count: results.length });
   } catch (err) {
     res.status(500).json({ error: 'Report generation failed', details: err.message });
