@@ -8,7 +8,7 @@ const router = express.Router();
 const fs = require('fs');
 const path = require('path');
 const { authenticateToken } = require('../middleware/auth');
-const { execSync } = require('child_process');
+const { execFileSync } = require('child_process');
 
 // VULN #22: Unrestricted File Upload (CWE-434)
 // No file type validation, no size limit, uploads to web-accessible directory
@@ -100,12 +100,23 @@ router.post('/resize', authenticateToken, (req, res) => {
   const { filename, width, height } = req.body;
 
   try {
-    // User-controlled filename passed directly to shell command
-    // Attacker can inject: filename = "image.png; rm -rf / #"
-    const cmd = `convert public/uploads/${filename} -resize ${width}x${height} public/uploads/resized_${filename}`;
-    execSync(cmd);
+    // SECURITY FIX: Use execFileSync with argument array to avoid shell injection
+    // Also validate filename to allow only safe characters (alphanumeric, underscore, dash, dot)
+    if (!filename || !/^[a-zA-Z0-9._-]+$/.test(filename)) {
+      return res.status(400).json({ error: 'Invalid filename' });
+    }
+    if (!width || !height || isNaN(width) || isNaN(height)) {
+      return res.status(400).json({ error: 'Invalid width or height' });
+    }
 
-    res.json({ message: 'Image resized', output: `resized_${filename}` });
+    const inputPath = path.join('public', 'uploads', filename);
+    const outputFilename = `resized_${filename}`;
+    const outputPath = path.join('public', 'uploads', outputFilename);
+
+    // Use execFileSync to call 'convert' with arguments array to prevent shell injection
+    execFileSync('convert', [inputPath, '-resize', `${width}x${height}`, outputPath]);
+
+    res.json({ message: 'Image resized', output: outputFilename });
   } catch (err) {
     res.status(500).json({ error: 'Resize failed', details: err.message });
   }
