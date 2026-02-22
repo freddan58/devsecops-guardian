@@ -10,35 +10,70 @@ const path = require('path');
 const { authenticateToken } = require('../middleware/auth');
 const { execSync } = require('child_process');
 
-// VULN #22: Unrestricted File Upload (CWE-434)
-// No file type validation, no size limit, uploads to web-accessible directory
-router.post('/avatar', authenticateToken, (req, res) => {
-  const filename = req.headers['x-filename'] || 'upload.bin';
-  const uploadDir = path.join(__dirname, '..', 'public', 'uploads');
+// Helper function to sanitize filename and prevent path traversal
+function sanitizeFilename(filename) {
+  // Remove any path separators and allow only alphanumeric, dash, underscore and dot
+  return filename.replace(/[^a-zA-Z0-9._-]/g, '_');
+}
 
-  // No sanitization of filename - allows path traversal in filename
-  // No file type checking - could upload .js, .php, .exe
-  // No file size limit - DoS via large uploads
-  const filePath = path.join(uploadDir, filename);
+// Allowed file extensions for upload
+const allowedExtensions = new Set(['.jpg', '.jpeg', '.png', '.gif']);
+
+// Max file size in bytes (e.g., 5MB)
+const MAX_FILE_SIZE = 5 * 1024 * 1024;
+
+// VULN #22: Unrestricted File Upload (CWE-434)
+// Fixed: sanitize filename to prevent path traversal, restrict allowed file types, impose size limit, store outside web root
+router.post('/avatar', authenticateToken, (req, res) => {
+  const rawFilename = req.headers['x-filename'] || 'upload.bin';
+  const sanitizedFilename = sanitizeFilename(rawFilename);
+  const ext = path.extname(sanitizedFilename).toLowerCase();
+
+  // Validate file extension
+  if (!allowedExtensions.has(ext)) {
+    return res.status(400).json({ error: 'Invalid file type' });
+  }
+
+  // Store uploads outside web root for security
+  const uploadDir = path.join(__dirname, '..', 'uploads');
 
   if (!fs.existsSync(uploadDir)) {
     fs.mkdirSync(uploadDir, { recursive: true });
   }
 
   const chunks = [];
-  req.on('data', chunk => chunks.push(chunk));
-  req.on('end', () => {
-    const buffer = Buffer.concat(chunks);
-    fs.writeFileSync(filePath, buffer);
+  let totalSize = 0;
 
-    // VULN #23: Using file extension to determine MIME type (CWE-436)
-    // Trusting user-controlled filename extension for content type detection
-    const ext = path.extname(filename).toLowerCase();
-    const mimeTypes = { '.jpg': 'image/jpeg', '.png': 'image/png', '.gif': 'image/gif' };
+  req.on('data', chunk => {
+    totalSize += chunk.length;
+    if (totalSize > MAX_FILE_SIZE) {
+      // Abort request if file too large
+      req.destroy();
+    } else {
+      chunks.push(chunk);
+    }
+  });
+
+  req.on('end', () => {
+    if (totalSize > MAX_FILE_SIZE) {
+      return res.status(413).json({ error: 'File too large' });
+    }
+
+    const buffer = Buffer.concat(chunks);
+    const filePath = path.join(uploadDir, sanitizedFilename);
+
+    // Write file safely
+    try {
+      fs.writeFileSync(filePath, buffer);
+    } catch (err) {
+      return res.status(500).json({ error: 'Failed to save file' });
+    }
+
+    const mimeTypes = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.gif': 'image/gif' };
 
     res.json({
       message: 'File uploaded',
-      path: `/uploads/${filename}`,
+      path: `/uploads/${sanitizedFilename}`,
       size: buffer.length,
       type: mimeTypes[ext] || 'application/octet-stream',
     });
