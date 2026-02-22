@@ -38,7 +38,7 @@ router.post('/validate-email', (req, res) => {
 
   // This regex has catastrophic backtracking:
   // Input like "aaaaaaaaaaaaaaaaaaaaaaaaaaaa!" will hang the server
-  const emailRegex = /^([a-zA-Z0-9])(([\-.]|[_]+)?([a-zA-Z0-9]+))*(@){1}[a-z0-9]+[.]{1}(([a-z]{2,3})|([a-z]{2,3}[.]{1}[a-z]{2,3}))$/;
+  const emailRegex = /^([a-zA-Z0-9])(([-.]|[_]+)?([a-zA-Z0-9]+))*(@){1}[a-z0-9]+[.]{1}(([a-z]{2,3})|([a-z]{2,3}[.]{1}[a-z]{2,3}))$/;
 
   const startTime = Date.now();
   const isValid = emailRegex.test(email);
@@ -70,7 +70,6 @@ router.post('/subscribe', authenticateToken, (req, res) => {
 });
 
 // VULN #30: Improper Error Handling - Stack Trace Exposure (CWE-209)
-// Full stack traces and internal details exposed to client
 router.get('/history', authenticateToken, (req, res) => {
   try {
     const db = getDatabase();
@@ -81,17 +80,10 @@ router.get('/history', authenticateToken, (req, res) => {
 
     res.json({ data: notifications });
   } catch (err) {
-    // VULNERABLE: Exposes full error details including stack trace, file paths
-    res.status(500).json({
-      error: err.message,
-      stack: err.stack,           // Full stack trace with file paths
-      code: err.code,
-      errno: err.errno,
-      sql_state: err.sqlState,
-      query: err.sql,             // Leaks the SQL query
-      database_path: process.env.DATABASE_URL || '/app/banking.db',
-      node_env: process.env.NODE_ENV,
-    });
+    // FIX: Do not expose stack trace or internal error details to client,
+    // log error details server-side for diagnostics.
+    console.error('Internal Server Error:', { message: err.message, stack: err.stack });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
