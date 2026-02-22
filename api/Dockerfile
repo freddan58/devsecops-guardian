@@ -24,12 +24,8 @@ RUN pip install --no-cache-dir "mcp[cli]>=1.0.0"
 COPY api/requirements.txt /tmp/api-reqs.txt
 RUN pip install --no-cache-dir -r /tmp/api-reqs.txt
 
-# Fix OpenTelemetry version conflict (agent-framework pulls incompatible combo)
-RUN pip install --no-cache-dir --force-reinstall \
-    "opentelemetry-sdk==1.29.0" \
-    "opentelemetry-api==1.29.0" \
-    "azure-monitor-opentelemetry-exporter==1.0.0b33" \
-    "opentelemetry-semantic-conventions==0.50b0"
+# Install OTLP exporter for Application Insights (avoids azure-monitor version conflicts)
+RUN pip install --no-cache-dir "opentelemetry-exporter-otlp-proto-http"
 
 # Copy application code
 COPY agents/ /app/agents/
