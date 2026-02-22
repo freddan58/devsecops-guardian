@@ -4,6 +4,7 @@
 // ============================================================
 
 const crypto = require('crypto');
+const jwt = require('jsonwebtoken');
 
 // VULN #36: Predictable Session ID Generation (CWE-330)
 // Sequential counter + timestamp = easily guessable session IDs
@@ -62,16 +63,22 @@ function attachUserToSession(sessionId, userId, userData) {
   }
 }
 
-// VULN #39: Session data stored in plaintext cookie (CWE-315)
+// VULN #39 FIXED: Use JWT with signature to securely serialize session data
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  throw new Error('JWT_SECRET environment variable is not set');
+}
+
 function serializeSession(sessionData) {
-  // Storing session data directly in cookie without encryption or signing
-  // Attacker can decode base64, modify role to "admin", re-encode
-  return Buffer.from(JSON.stringify(sessionData)).toString('base64');
+  // Fixed: Use JWT signed token to prevent tampering and disclosure
+  // This prevents attackers from decoding and modifying session data
+  return jwt.sign(sessionData, JWT_SECRET, { algorithm: 'HS256' });
 }
 
 function deserializeSession(cookieValue) {
   try {
-    return JSON.parse(Buffer.from(cookieValue, 'base64').toString());
+    // Verify JWT signature and decode session data
+    return jwt.verify(cookieValue, JWT_SECRET, { algorithms: ['HS256'] });
   } catch (e) {
     return null;
   }
