@@ -7,6 +7,7 @@ const express = require('express');
 const router = express.Router();
 const http = require('http');
 const https = require('https');
+const { URL } = require('url');
 
 // VULNERABLE: SSRF - user-supplied URL is fetched by the server
 // POST /api/webhooks/test
@@ -51,7 +52,7 @@ router.post('/test', async (req, res) => {
   }
 });
 
-// VULNERABLE: URL fetcher for "link preview" feature
+// FIXED: Added URL validation to allow only trusted domains and removed response headers from output
 // GET /api/webhooks/preview?url=http://internal-service:8080/admin
 router.get('/preview', (req, res) => {
   const { url } = req.query;
@@ -60,8 +61,21 @@ router.get('/preview', (req, res) => {
     return res.status(400).json({ error: 'URL parameter required' });
   }
 
-  // VULNERABLE: Fetching arbitrary URLs without blocklist validation
-  const protocol = url.startsWith('https') ? https : http;
+  let parsedUrl;
+  try {
+    parsedUrl = new URL(url);
+  } catch (e) {
+    return res.status(400).json({ error: 'Invalid URL format' });
+  }
+
+  // Allowlist of trusted domains for SSRF protection
+  const allowedHosts = ['example.com', 'www.example.com', 'trustedpartner.com'];
+
+  if (!allowedHosts.includes(parsedUrl.hostname)) {
+    return res.status(403).json({ error: 'URL domain is not allowed' });
+  }
+
+  const protocol = parsedUrl.protocol === 'https:' ? https : http;
 
   protocol.get(url, (resp) => {
     let data = '';
@@ -72,9 +86,8 @@ router.get('/preview', (req, res) => {
       res.json({
         url: url,
         title: titleMatch ? titleMatch[1] : 'No title',
-        status: resp.statusCode,
-        // VULNERABLE: Leaking internal response headers
-        headers: resp.headers,
+        status: resp.statusCode
+        // Removed headers to prevent leaking internal response headers
       });
     });
   }).on('error', (err) => {
