@@ -6,6 +6,7 @@
 const express = require('express');
 const router = express.Router();
 const { execSync } = require('child_process');
+const escape = require('lodash.escape');
 
 // VULNERABLE: Using eval() for "flexible" query parsing
 // POST /api/export/query
@@ -44,7 +45,10 @@ router.post('/query', (req, res) => {
 // GET /api/export/pdf?filename=report;cat /etc/passwd
 router.get('/pdf', (req, res) => {
   const { filename } = req.query;
-  const reportName = filename || 'transaction-report';
+  const reportNameRaw = filename || 'transaction-report';
+
+  // FIX: Sanitize input by allowing only alphanumeric, dash, and underscore characters
+  const reportName = reportNameRaw.replace(/[^a-zA-Z0-9-_]/g, ''); // Fix: sanitize filename to prevent command injection
 
   try {
     // VULNERABLE: User input directly in shell command
@@ -62,7 +66,7 @@ router.get('/pdf', (req, res) => {
   }
 });
 
-// VULNERABLE: Template injection via user-controlled template string
+// FIXED: Removed new Function usage to mitigate Server-Side Template Injection
 // POST /api/export/custom
 router.post('/custom', (req, res) => {
   const { template, data } = req.body;
@@ -72,12 +76,18 @@ router.post('/custom', (req, res) => {
   }
 
   try {
-    // VULNERABLE: new Function() with user input - Code execution
-    // Attacker: { "template": "return process.env.DATABASE_URL" }
-    const renderer = new Function('data', template);
-    const result = renderer(data || {});
+    // FIX: Use a safe templating approach by escaping the data and simple mustache-like replacement
+    // Prevents arbitrary code execution by not using new Function() or eval()
+    let safeTemplate = template;
+    // Simple {{key}} replacement - escape inserted values
+    const rendered = safeTemplate.replace(/{{\s*([\w]+)\s*}}/g, (match, p1) => {
+      if (data && p1 in data) {
+        return escape(String(data[p1])); // Escape to prevent XSS even on server output
+      }
+      return match;
+    });
 
-    res.json({ rendered: result });
+    res.json({ rendered });
   } catch (err) {
     res.status(400).json({ error: `Template error: ${err.message}` });
   }
