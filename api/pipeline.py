@@ -262,7 +262,13 @@ async def _run_pipeline_inner(scan: ScanRecord):
         print(f"  [!] Fixer failed (non-blocking): {err}")
     else:
         scan.set_stage("fixer", "completed")
+        if os.path.exists(fixer_out):
+            fsize = os.path.getsize(fixer_out)
+            print(f"  [>] Fixer output: {fixer_out} ({fsize} bytes)")
+        else:
+            print(f"  [>] Fixer output NOT found: {fixer_out}")
         scan.load_output("fixer", fixer_out)
+        print(f"  [>] fixer_output loaded: {scan.fixer_output is not None}")
     scan_store.save(scan)
 
     # ---- STAGE 4: RISK PROFILER ----
@@ -287,7 +293,13 @@ async def _run_pipeline_inner(scan: ScanRecord):
             print(f"  [!] Risk Profiler failed (non-blocking): {err}")
         else:
             scan.set_stage("risk-profiler", "completed")
+            if os.path.exists(risk_out):
+                fsize = os.path.getsize(risk_out)
+                print(f"  [>] Risk profiler output: {risk_out} ({fsize} bytes)")
+            else:
+                print(f"  [>] Risk profiler output NOT found: {risk_out}")
             scan.load_output("risk_profile", risk_out)
+            print(f"  [>] risk_profile_output loaded: {scan.risk_profile_output is not None}")
     else:
         scan.set_stage("risk-profiler", "skipped")
     scan_store.save(scan)
@@ -314,7 +326,13 @@ async def _run_pipeline_inner(scan: ScanRecord):
         print(f"  [!] Compliance failed (non-blocking): {err}")
     else:
         scan.set_stage("compliance", "completed")
+        if os.path.exists(compliance_json):
+            fsize = os.path.getsize(compliance_json)
+            print(f"  [>] Compliance output: {compliance_json} ({fsize} bytes)")
+        else:
+            print(f"  [>] Compliance output NOT found: {compliance_json}")
         scan.load_output("compliance", compliance_json)
+        print(f"  [>] compliance_output loaded: {scan.compliance_output is not None}")
 
     # ---- COMPARISON (if re-scan) ----
     if scan.parent_scan_id:

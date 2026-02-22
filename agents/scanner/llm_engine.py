@@ -100,7 +100,7 @@ async def _call_via_foundry(messages: list[dict]) -> str:
                 model=MODEL_DEPLOYMENT,
                 messages=messages,
                 temperature=0.1,
-                max_tokens=8000,
+                max_tokens=16000,
                 response_format={"type": "json_object"},
                 user=FOUNDRY_AGENT_NAME,
             )
@@ -125,7 +125,7 @@ async def _call_direct(messages: list[dict]) -> str:
     body = {
         "messages": messages,
         "temperature": 0.1,
-        "max_tokens": 8000,
+        "max_tokens": 16000,
         "response_format": {"type": "json_object"},
     }
 
@@ -139,6 +139,22 @@ async def _call_direct(messages: list[dict]) -> str:
 
         data = response.json()
         return data["choices"][0]["message"]["content"]
+
+
+def _repair_truncated_json(raw: str) -> str:
+    """Attempt to repair truncated JSON by closing open structures."""
+    # Find the last complete JSON object in an array
+    # Look for the last '},' or '}' followed by valid array content
+    last_complete = raw.rfind('},')
+    if last_complete > 0:
+        # Truncate at the last complete object and close the structures
+        repaired = raw[:last_complete + 1]
+        # Count unclosed brackets
+        open_brackets = repaired.count('[') - repaired.count(']')
+        open_braces = repaired.count('{') - repaired.count('}')
+        repaired += ']' * open_brackets + '}' * open_braces
+        return repaired
+    return raw
 
 
 def _parse_findings(raw_response: str) -> list[dict]:
@@ -217,6 +233,19 @@ def _parse_findings(raw_response: str) -> list[dict]:
 
     except json.JSONDecodeError as e:
         print(f"  [!] Failed to parse LLM response as JSON: {e}")
+        print(f"  [!] Attempting truncated JSON recovery...")
+        try:
+            repaired = _repair_truncated_json(raw_response)
+            parsed = json.loads(repaired)
+            if isinstance(parsed, dict):
+                for key in ("findings", "vulnerabilities", "results"):
+                    if key in parsed and isinstance(parsed[key], list):
+                        findings = parsed[key]
+                        print(f"  [!] Recovered {len(findings)} findings from truncated response")
+                        return findings
+            print(f"  [!] Recovery failed - unexpected structure")
+        except json.JSONDecodeError:
+            print(f"  [!] Recovery also failed to parse")
         print(f"  [!] Raw response: {raw_response[:500]}")
         return []
 

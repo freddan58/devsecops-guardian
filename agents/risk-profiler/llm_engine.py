@@ -75,7 +75,7 @@ async def _call_via_foundry(messages: list[dict]) -> str:
                 model=MODEL_DEPLOYMENT,
                 messages=messages,
                 temperature=0.1,
-                max_tokens=8000,
+                max_tokens=16000,
                 response_format={"type": "json_object"},
                 user=FOUNDRY_AGENT_NAME,
             )
@@ -100,7 +100,7 @@ async def _call_direct(messages: list[dict]) -> str:
     body = {
         "messages": messages,
         "temperature": 0.1,
-        "max_tokens": 8000,
+        "max_tokens": 16000,
         "response_format": {"type": "json_object"},
     }
 
