@@ -30,12 +30,61 @@ MODEL_DEPLOYMENT = os.getenv("MODEL_DEPLOYMENT", "gpt-4.1-mini")
 FOUNDRY_AGENT_NAME = "VulnerabilityAnalyzer"
 
 _foundry_openai = None
+_tracing_initialized = False
+
+
+def _init_tracing():
+    """Initialize OpenTelemetry tracing + ResponsesInstrumentor for Foundry telemetry.
+
+    Sets up:
+    1. TracerProvider with AzureMonitorTraceExporter (if App Insights configured)
+    2. azure-core tracing implementation for SDK-level spans
+    3. ResponsesInstrumentor to capture gen_ai.* spans from responses.create()
+    """
+    global _tracing_initialized
+    if _tracing_initialized:
+        return
+    _tracing_initialized = True
+    try:
+        from opentelemetry import trace
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+
+        app_insights_cs = os.environ.get("APPLICATIONINSIGHTS_CONNECTION_STRING", "")
+        if app_insights_cs:
+            try:
+                from opentelemetry.sdk._logs import LogData  # noqa: F401
+            except ImportError:
+                import opentelemetry.sdk._logs as _logs_mod
+                class _LogDataStub:
+                    pass
+                _logs_mod.LogData = _LogDataStub
+
+            from azure.monitor.opentelemetry.exporter import AzureMonitorTraceExporter
+            provider = TracerProvider()
+            exporter = AzureMonitorTraceExporter(connection_string=app_insights_cs)
+            provider.add_span_processor(SimpleSpanProcessor(exporter))
+            trace.set_tracer_provider(provider)
+            print(f"  [Foundry] TracerProvider + AzureMonitor exporter set for {FOUNDRY_AGENT_NAME}")
+
+        from azure.core.settings import settings
+        from azure.core.tracing.ext.opentelemetry_span import OpenTelemetrySpan
+        settings.tracing_implementation = OpenTelemetrySpan
+
+        from opentelemetry.instrumentation.openai import ResponsesInstrumentor
+        ResponsesInstrumentor().instrument(enable_content_recording=True)
+        print(f"  [Foundry] ResponsesInstrumentor enabled for {FOUNDRY_AGENT_NAME}")
+    except ImportError as e:
+        print(f"  [Foundry] Tracing setup skipped (missing dep): {e}")
+    except Exception as e:
+        print(f"  [Foundry] Tracing setup warning: {e}")
 
 
 def _get_foundry_openai():
     """Get OpenAI client configured for Foundry project (cached)."""
     global _foundry_openai
     if _foundry_openai is None:
+        _init_tracing()
         from azure.ai.projects import AIProjectClient
         from azure.identity import DefaultAzureCredential
         project = AIProjectClient(
@@ -80,31 +129,28 @@ async def _call_llm(messages: list[dict]) -> str:
 
 
 async def _call_via_foundry(messages: list[dict]) -> str:
-    """Call LLM through Foundry Responses API (enables telemetry + evaluation)."""
+    """Call LLM through Foundry Responses API (enables telemetry + evaluation).
+
+    Uses model=MODEL_DEPLOYMENT with instructions=system_prompt so that:
+    - The call routes through the Foundry endpoint for telemetry/App Insights
+    - ResponsesInstrumentor generates gen_ai spans for the Operate tab
+    - The agent's system prompt is passed via the instructions parameter
+    """
+    system_parts = [m["content"] for m in messages if m["role"] == "system"]
     user_parts = [m["content"] for m in messages if m["role"] == "user"]
+    system_prompt = "\n\n".join(system_parts) if system_parts else None
     user_prompt = "\n\n".join(user_parts)
 
     def _sync_call():
         client = _get_foundry_openai()
-        try:
-            response = client.responses.create(
-                model=FOUNDRY_AGENT_NAME,
-                input=[{"role": "user", "content": user_prompt}],
-                text={"format": {"type": "json_object"}},
-            )
-            print(f"  [Foundry] {FOUNDRY_AGENT_NAME} responded via Responses API")
-            return response.output_text
-        except Exception as e:
-            print(f"  [Foundry] Responses API: {e}, using chat completions fallback")
-            response = client.chat.completions.create(
-                model=MODEL_DEPLOYMENT,
-                messages=messages,
-                temperature=0.1,
-                max_tokens=16000,
-                response_format={"type": "json_object"},
-                user=FOUNDRY_AGENT_NAME,
-            )
-            return response.choices[0].message.content
+        response = client.responses.create(
+            model=MODEL_DEPLOYMENT,
+            instructions=system_prompt,
+            input=[{"role": "user", "content": user_prompt}],
+            text={"format": {"type": "json_object"}},
+        )
+        print(f"  [Foundry] {FOUNDRY_AGENT_NAME} responded via Responses API (model={MODEL_DEPLOYMENT})")
+        return response.output_text
 
     return await asyncio.to_thread(_sync_call)
 
