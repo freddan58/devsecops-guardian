@@ -52,10 +52,14 @@ router.get('/debug', (req, res) => {
 });
 
 // VULN #15: Privilege Escalation - No role check (CWE-269)
-// Any authenticated user can grant admin role to any user
+// Fixed: Added admin role check to prevent unauthorized privilege escalation
 router.post('/promote/:id', authenticateToken, (req, res) => {
   const { id } = req.params;
-  // No check if req.user.role === 'admin'
+
+  // Security fix: Only allow users with 'admin' role to promote others
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Forbidden: Admins only' });
+  }
 
   try {
     const db = getDatabase();
