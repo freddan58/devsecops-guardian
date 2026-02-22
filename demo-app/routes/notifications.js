@@ -38,7 +38,7 @@ router.post('/validate-email', (req, res) => {
 
   // This regex has catastrophic backtracking:
   // Input like "aaaaaaaaaaaaaaaaaaaaaaaaaaaa!" will hang the server
-  const emailRegex = /^([a-zA-Z0-9])(([\-.]|[_]+)?([a-zA-Z0-9]+))*(@){1}[a-z0-9]+[.]{1}(([a-z]{2,3})|([a-z]{2,3}[.]{1}[a-z]{2,3}))$/;
+  const emailRegex = /^([a-zA-Z0-9])(([-.]|[_]+)?([a-zA-Z0-9]+))*(@){1}[a-z0-9]+[.]{1}(([a-z]{2,3})|([a-z]{2,3}[.]{1}[a-z]{2,3}))$/;
 
   const startTime = Date.now();
   const isValid = emailRegex.test(email);
@@ -96,14 +96,22 @@ router.get('/history', authenticateToken, (req, res) => {
 });
 
 // VULN #31: HTTP Response Splitting / Header Injection (CWE-113)
-// User input directly in response headers
+// Fix: sanitize user inputs to prevent CRLF injection in HTTP headers
+function sanitizeHeaderValue(value) {
+  if (typeof value !== 'string') return '';
+  // Remove CR and LF characters to prevent header injection
+  return value.replace(/[\r\n]/g, '');
+}
+
 router.get('/unsubscribe', (req, res) => {
   const { token, redirect } = req.query;
 
-  // User-controlled value in response header
-  // Attacker: redirect=foo%0d%0aSet-Cookie:%20admin=true
-  res.setHeader('X-Unsubscribe-Redirect', redirect || '/');
-  res.setHeader('X-Token-Used', token || 'none');
+  // Sanitize inputs to prevent HTTP response splitting / header injection
+  const safeRedirect = sanitizeHeaderValue(redirect) || '/';
+  const safeToken = sanitizeHeaderValue(token) || 'none';
+
+  res.setHeader('X-Unsubscribe-Redirect', safeRedirect); // Fixed header injection
+  res.setHeader('X-Token-Used', safeToken);              // Fixed header injection
 
   res.json({ message: 'Unsubscribed successfully' });
 });
