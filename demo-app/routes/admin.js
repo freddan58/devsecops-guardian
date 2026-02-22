@@ -7,6 +7,7 @@ const express = require('express');
 const router = express.Router();
 const { getDatabase } = require('../config/database');
 const { authenticateToken } = require('../middleware/auth');
+const rateLimit = require('express-rate-limit');
 
 // VULN #13: Mass Assignment (CWE-915)
 // Accepts entire request body and merges into user record
@@ -66,21 +67,52 @@ router.post('/promote/:id', authenticateToken, (req, res) => {
   }
 });
 
-// VULN #16: Bulk Data Export Without Pagination or Rate Limiting (CWE-770)
-// Returns ALL records - denial of service / data exfiltration
-router.get('/export-all', (req, res) => {
-  const db = getDatabase();
-  const users = db.prepare('SELECT * FROM users').all();
-  const accounts = db.prepare('SELECT * FROM accounts').all();
-  const transactions = db.prepare('SELECT * FROM transactions').all();
+// Add rate limiter middleware configured for export-all endpoint
+const exportAllLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10, // limit each IP to 10 requests per windowMs
+  message: {
+    error: 'Too many export requests from this IP, please try again later.'
+  }
+});
 
-  // No pagination, no rate limiting, no auth
+// VULN #16: Bulk Data Export Without Pagination or Rate Limiting (CWE-770)
+// Fixed: Added authentication, rate limiting, and pagination to prevent data exfiltration and DoS
+router.get('/export-all', authenticateToken, exportAllLimiter, (req, res) => {
+  const db = getDatabase();
+
+  // Pagination parameters with defaults and max limits
+  const usersPage = Math.max(1, parseInt(req.query.usersPage)) || 1;
+  const accountsPage = Math.max(1, parseInt(req.query.accountsPage)) || 1;
+  const transactionsPage = Math.max(1, parseInt(req.query.transactionsPage)) || 1;
+
+  const pageSize = 100; // fixed page size to prevent large dumps
+
+  // Use parameterized queries with LIMIT and OFFSET for pagination
+  const users = db.prepare('SELECT id, username, email, role, created_at FROM users LIMIT ? OFFSET ?')
+    .all(pageSize, (usersPage - 1) * pageSize);
+
+  const accounts = db.prepare('SELECT id, user_id, account_type, created_at FROM accounts LIMIT ? OFFSET ?')
+    .all(pageSize, (accountsPage - 1) * pageSize);
+
+  const transactions = db.prepare('SELECT id, account_id, amount, type, created_at FROM transactions LIMIT ? OFFSET ?')
+    .all(pageSize, (transactionsPage - 1) * pageSize);
+
+  // Sensitive fields like password hashes and balances are excluded deliberately
+
   res.json({
-    users: users,           // Includes password hashes
-    accounts: accounts,     // Includes balances
+    users: users,
+    accounts: accounts,
     transactions: transactions,
+    pagination: {
+      usersPage,
+      accountsPage,
+      transactionsPage,
+      pageSize
+    },
     exported_at: new Date().toISOString(),
   });
+  // Security: Authenticated, rate-limited, paginated data export avoiding sensitive fields
 });
 
 module.exports = router;
