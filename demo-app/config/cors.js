@@ -15,20 +15,33 @@ const corsOptions = {
 };
 
 // VULN #41: Missing Security Headers (CWE-693)
-// No CSP, no X-Frame-Options, no HSTS
+// Added critical security headers to mitigate XSS, clickjacking, downgrade attacks, MIME sniffing, and privacy leaks
 function insecureHeaders(req, res, next) {
-  // Deliberately NOT setting important security headers:
-  // - Content-Security-Policy (CSP)
-  // - X-Frame-Options (clickjacking protection)
-  // - Strict-Transport-Security (HSTS)
-  // - X-Content-Type-Options
-  // - Referrer-Policy
-  // - Permissions-Policy
+  // Remove dangerous headers that disclose server info and debug data
+  // Set recommended security headers
+  res.removeHeader('X-Powered-By');
+  res.removeHeader('Server');
+  res.removeHeader('X-Debug-Mode');
 
-  // Actually setting DANGEROUS headers
-  res.setHeader('X-Powered-By', 'Express 4.18.2');  // Server fingerprinting
-  res.setHeader('Server', 'NodeJS/18.19.0');          // Version disclosure
-  res.setHeader('X-Debug-Mode', 'enabled');           // Debug info exposure
+  // Content-Security-Policy to restrict sources of scripts, styles, and other resources
+  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self';");
+
+  // Clickjacking protection
+  res.setHeader('X-Frame-Options', 'DENY');
+
+  // Enforce HTTPS for 1 year including subdomains
+  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
+
+  // Prevent MIME sniffing
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+
+  // Control referrer information sent
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+
+  // Limit browser features to reduce attack surface
+  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+
+  // Preserve CORS headers as originally set
   res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
   res.setHeader('Access-Control-Allow-Credentials', 'true');
 
