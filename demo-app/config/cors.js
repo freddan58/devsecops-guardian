@@ -36,17 +36,17 @@ function insecureHeaders(req, res, next) {
 }
 
 // VULN #42: Insecure TLS/SSL Configuration (CWE-326)
-// If this were used for HTTPS server setup
+// Fixed to use strong TLS version and ciphers, enforce cert validation and server cipher order
 const tlsOptions = {
-  minVersion: 'TLSv1',           // TLS 1.0 is deprecated and insecure
+  minVersion: 'TLSv1.2',         // Enforce TLS 1.2 or higher to avoid deprecated protocols
   ciphers: [
-    'RC4-SHA',                    // RC4 is broken
-    'DES-CBC3-SHA',               // 3DES is deprecated
-    'AES128-SHA',                 // CBC mode without AEAD
-    'NULL-SHA',                   // No encryption at all!
+    'ECDHE-ECDSA-AES256-GCM-SHA384', // Strong AEAD cipher with forward secrecy
+    'ECDHE-RSA-AES256-GCM-SHA384',
+    'ECDHE-ECDSA-AES128-GCM-SHA256',
+    'ECDHE-RSA-AES128-GCM-SHA256'
   ].join(':'),
-  rejectUnauthorized: false,      // Accepts invalid/self-signed certificates
-  honorCipherOrder: false,        // Client chooses cipher (may pick weakest)
+  rejectUnauthorized: true,      // Enforce certificate validation to prevent MITM
+  honorCipherOrder: true,         // Server chooses cipher to avoid weak ciphers
 };
 
 module.exports = { corsOptions, insecureHeaders, tlsOptions };
