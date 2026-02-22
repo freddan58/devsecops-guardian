@@ -7,10 +7,67 @@ const express = require('express');
 const router = express.Router();
 const { execSync } = require('child_process');
 
-// VULNERABLE: Using eval() for "flexible" query parsing
+// Helper function to safely parse filter expressions
+// Only allow simple JSON-like filter objects with limited operators
+function safeParseFilter(filterStr) {
+  // Basic validation: filter must be a JSON object string
+  // Reject if contains characters that could lead to code execution
+  if (typeof filterStr !== 'string') {
+    throw new Error('Filter must be a string');
+  }
+
+  // Disallow characters that are not allowed in JSON
+  // Allow only whitespace, digits, letters, underscore, colon, comma, braces, brackets, quotes, dollar sign, and operators $gt, $lt, $eq, $ne
+  // This is a whitelist approach to prevent code injection
+  const allowedPattern = /^[\s\d\w\{\}\[\]\:\,\"\'\$\_\>\<\=\!\-]+$/;
+  if (!allowedPattern.test(filterStr)) {
+    throw new Error('Filter contains invalid characters');
+  }
+
+  // Attempt to parse JSON safely
+  // Replace single quotes with double quotes for JSON parsing
+  let jsonStr = filterStr.replace(/'/g, '"');
+
+  // Validate that the string is a valid JSON object
+  let parsed;
+  try {
+    parsed = JSON.parse(jsonStr);
+  } catch (e) {
+    throw new Error('Filter is not valid JSON');
+  }
+
+  // Additional validation: ensure parsed is an object
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error('Filter must be a JSON object');
+  }
+
+  // Optionally, validate keys and values recursively to allow only expected operators
+  function validateObject(obj) {
+    for (const key in obj) {
+      if (typeof key !== 'string') {
+        throw new Error('Filter keys must be strings');
+      }
+      // Allow keys to be alphanumeric or start with $ for operators
+      if (!/^\$?[a-zA-Z0-9_]+$/.test(key)) {
+        throw new Error('Invalid filter key: ' + key);
+      }
+      const val = obj[key];
+      if (val && typeof val === 'object') {
+        validateObject(val);
+      } else if (typeof val !== 'string' && typeof val !== 'number' && typeof val !== 'boolean' && val !== null) {
+        throw new Error('Invalid filter value type');
+      }
+    }
+  }
+
+  validateObject(parsed);
+
+  return parsed;
+}
+
 // POST /api/export/query
 // Body: { "filter": "({amount: {$gt: 1000}})" }
-// Exploit: { "filter": "(require('child_process').execSync('cat /etc/passwd').toString())" }
+// Fixed: Removed unsafe eval() and replaced with safe JSON parsing and validation
 router.post('/query', (req, res) => {
   const { filter, format } = req.body;
 
@@ -19,9 +76,9 @@ router.post('/query', (req, res) => {
   }
 
   try {
-    // VULNERABLE: eval() on user input - Remote Code Execution
-    // "We need eval for flexible query expressions" - famous last words
-    const parsedFilter = eval(filter);
+    // FIXED: Removed eval() to prevent Remote Code Execution
+    // Instead, safely parse filter string as JSON with strict validation
+    const parsedFilter = safeParseFilter(filter);
 
     // Simulate filtered data export
     const mockData = [
@@ -33,7 +90,7 @@ router.post('/query', (req, res) => {
     res.json({
       format: format || 'json',
       results: mockData,
-      filter_applied: String(parsedFilter),
+      filter_applied: JSON.stringify(parsedFilter),
     });
   } catch (err) {
     res.status(400).json({ error: `Invalid filter expression: ${err.message}` });
