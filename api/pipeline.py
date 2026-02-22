@@ -28,12 +28,18 @@ from schemas import ScanStatus
 
 # --- OpenTelemetry Tracing Setup ---
 from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 
 try:
+    from azure.monitor.opentelemetry.exporter import AzureMonitorTraceExporter
+
     APP_INSIGHTS_CS = os.environ.get("APPLICATIONINSIGHTS_CONNECTION_STRING", "")
     if APP_INSIGHTS_CS:
-        from azure.monitor.opentelemetry import configure_azure_monitor
-        configure_azure_monitor(connection_string=APP_INSIGHTS_CS)
+        provider = TracerProvider()
+        exporter = AzureMonitorTraceExporter(connection_string=APP_INSIGHTS_CS)
+        provider.add_span_processor(SimpleSpanProcessor(exporter))
+        trace.set_tracer_provider(provider)
         print("  [tracing] OpenTelemetry tracing enabled with Application Insights")
     else:
         print("  [tracing] APPLICATIONINSIGHTS_CONNECTION_STRING not set, tracing spans are local-only")
