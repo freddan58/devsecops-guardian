@@ -46,10 +46,8 @@ router.get('/profile', authenticateToken, (req, res) => {
   res.json({ data: user });
 });
 
-// VULNERABLE: DELETE without authentication middleware!
-// Any unauthenticated user can delete any user account
-// Should have: router.delete('/:id', authenticateToken, ...)
-router.delete('/:id', (req, res) => {
+// FIXED: DELETE now requires authentication
+router.delete('/:id', authenticateToken, (req, res) => {
   const { id } = req.params;
 
   try {
