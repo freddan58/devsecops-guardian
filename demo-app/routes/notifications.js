@@ -48,22 +48,27 @@ router.post('/validate-email', (req, res) => {
 });
 
 // VULN #29: Insecure Cookie Configuration (CWE-614)
-// Session cookie without Secure, HttpOnly, or SameSite flags
+// Fixed by setting Secure, HttpOnly, and SameSite flags properly to prevent XSS and CSRF
+// Also reduced cookie maxAge for session_token and improved SameSite policy
 router.post('/subscribe', authenticateToken, (req, res) => {
   const { channel, frequency } = req.body;
 
-  // Setting session/preference cookies without security flags
+  // Secure and HttpOnly flags set for 'notification_prefs' cookie
+  // SameSite set to 'Lax' to mitigate CSRF while allowing top-level navigation
   res.cookie('notification_prefs', JSON.stringify({ channel, frequency }), {
-    httpOnly: false,    // Accessible via JavaScript - XSS can steal it
-    secure: false,      // Sent over HTTP - MITM can intercept
-    sameSite: 'none',   // Sent with cross-site requests - CSRF vulnerable
-    maxAge: 365 * 24 * 60 * 60 * 1000, // 1 year - excessive lifetime
+    httpOnly: true,       // Prevent JS access to cookie - mitigates XSS cookie theft
+    secure: true,         // Cookie sent only over HTTPS
+    sameSite: 'Lax',      // Restricts cross-site sending to mitigate CSRF
+    maxAge: 30 * 24 * 60 * 60 * 1000, // Reduced to 30 days for security best practice
   });
 
-  // Also storing user session token in a regular cookie
+  // session_token cookie set with Secure, HttpOnly, and SameSite
+  // Limited lifetime for session cookie, preventing persistent exposure
   res.cookie('session_token', req.headers['authorization'], {
-    httpOnly: false,
-    secure: false,
+    httpOnly: true,
+    secure: true,
+    sameSite: 'Strict',   // Strict to tightly bind session cookie to first-party context
+    maxAge: 24 * 60 * 60 * 1000, // 1 day session validity
   });
 
   res.json({ message: 'Subscribed to notifications', channel, frequency });
