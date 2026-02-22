@@ -7,6 +7,7 @@ const express = require('express');
 const router = express.Router();
 const http = require('http');
 const https = require('https');
+const urlModule = require('url');
 
 // VULNERABLE: SSRF - user-supplied URL is fetched by the server
 // POST /api/webhooks/test
@@ -51,7 +52,7 @@ router.post('/test', async (req, res) => {
   }
 });
 
-// VULNERABLE: URL fetcher for "link preview" feature
+// FIXED: Added URL validation to allow only trusted domains and removed response headers to prevent internal info leakage
 // GET /api/webhooks/preview?url=http://internal-service:8080/admin
 router.get('/preview', (req, res) => {
   const { url } = req.query;
@@ -60,21 +61,34 @@ router.get('/preview', (req, res) => {
     return res.status(400).json({ error: 'URL parameter required' });
   }
 
-  // VULNERABLE: Fetching arbitrary URLs without blocklist validation
-  const protocol = url.startsWith('https') ? https : http;
+  // Parse and validate URL
+  let parsedUrl;
+  try {
+    parsedUrl = new urlModule.URL(url);
+  } catch (e) {
+    return res.status(400).json({ error: 'Invalid URL format' });
+  }
 
-  protocol.get(url, (resp) => {
+  // Define allowed hostnames for preview to prevent SSRF
+  const allowedHosts = ['example.com', 'www.example.com', 'trustedsite.org'];
+
+  if (!allowedHosts.includes(parsedUrl.hostname)) {
+    return res.status(403).json({ error: 'URL host is not allowed' });
+  }
+
+  const protocol = parsedUrl.protocol === 'https:' ? https : http;
+
+  protocol.get(parsedUrl.href, (resp) => {
     let data = '';
     resp.on('data', chunk => data += chunk);
     resp.on('end', () => {
       // Extract title for "preview"
       const titleMatch = data.match(/<title>(.*?)<\/title>/i);
       res.json({
-        url: url,
+        url: parsedUrl.href,
         title: titleMatch ? titleMatch[1] : 'No title',
-        status: resp.statusCode,
-        // VULNERABLE: Leaking internal response headers
-        headers: resp.headers,
+        status: resp.statusCode
+        // Removed headers to prevent leaking internal response headers
       });
     });
   }).on('error', (err) => {
