@@ -72,7 +72,11 @@ def _get_language(file_path: str) -> str:
 async def _call_llm(messages: list[dict]) -> str:
     """Call LLM via Foundry project or direct Azure OpenAI."""
     if FOUNDRY_ENDPOINT:
-        return await _call_via_foundry(messages)
+        try:
+            return await _call_via_foundry(messages)
+        except Exception as e:
+            print(f"  [!] Foundry call failed ({e}), falling back to direct Azure OpenAI")
+            return await _call_direct(messages)
     return await _call_direct(messages)
 
 

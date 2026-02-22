@@ -3,9 +3,12 @@ DevSecOps Guardian - Async Pipeline Runner
 
 Runs agents as async subprocesses, same pattern as run_pipeline.py
 but adapted for FastAPI BackgroundTasks.
+
+Includes OpenTelemetry tracing for Azure Monitor / Foundry Operate visibility.
 """
 
 import asyncio
+import logging
 import os
 import sys
 import traceback
@@ -23,6 +26,28 @@ from config import (
 from models import ScanRecord, scan_store
 from schemas import ScanStatus
 
+# --- OpenTelemetry Tracing Setup ---
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+
+try:
+    from azure.monitor.opentelemetry.exporter import AzureMonitorTraceExporter
+
+    APP_INSIGHTS_CS = os.environ.get("APPLICATIONINSIGHTS_CONNECTION_STRING", "")
+    if APP_INSIGHTS_CS:
+        provider = TracerProvider()
+        exporter = AzureMonitorTraceExporter(connection_string=APP_INSIGHTS_CS)
+        provider.add_span_processor(SimpleSpanProcessor(exporter))
+        trace.set_tracer_provider(provider)
+        logging.info("OpenTelemetry tracing enabled with Application Insights")
+    else:
+        logging.info("APPLICATIONINSIGHTS_CONNECTION_STRING not set, tracing spans are local-only")
+except ImportError:
+    logging.info("azure-monitor-opentelemetry-exporter not installed, tracing disabled")
+
+tracer = trace.get_tracer("devsecops-guardian-pipeline")
+
 
 async def run_agent(
     agent_name: str,
@@ -36,39 +61,48 @@ async def run_agent(
     Returns:
         Tuple of (return_code, stderr_output).
     """
-    cmd = [sys.executable, script] + args
-    print(f"  [>] Running {agent_name}: {' '.join(cmd)}")
-    print(f"  [>] Working dir: {agent_dir}")
+    with tracer.start_as_current_span(f"agent.{agent_name}", attributes={
+        "agent.name": agent_name,
+        "agent.script": script,
+    }) as span:
+        cmd = [sys.executable, script] + args
+        print(f"  [>] Running {agent_name}: {' '.join(cmd)}")
+        print(f"  [>] Working dir: {agent_dir}")
 
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            cwd=agent_dir,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await asyncio.wait_for(
-            proc.communicate(), timeout=timeout
-        )
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                cwd=agent_dir,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(), timeout=timeout
+            )
 
-        # Print stdout for visibility
-        if stdout:
-            for line in stdout.decode("utf-8", errors="replace").splitlines():
-                print(f"  [{agent_name}] {line}")
+            # Print stdout for visibility
+            if stdout:
+                for line in stdout.decode("utf-8", errors="replace").splitlines():
+                    print(f"  [{agent_name}] {line}")
 
-        stderr_text = stderr.decode("utf-8", errors="replace") if stderr else ""
-        if stderr_text:
-            for line in stderr_text.splitlines():
-                print(f"  [{agent_name} ERR] {line}")
+            stderr_text = stderr.decode("utf-8", errors="replace") if stderr else ""
+            if stderr_text:
+                for line in stderr_text.splitlines():
+                    print(f"  [{agent_name} ERR] {line}")
 
-        return proc.returncode or 0, stderr_text
+            span.set_attribute("agent.return_code", proc.returncode or 0)
+            return proc.returncode or 0, stderr_text
 
-    except asyncio.TimeoutError:
-        print(f"  [!!] {agent_name} timed out after {timeout}s")
-        return -1, f"Agent timed out after {timeout} seconds"
-    except Exception as e:
-        print(f"  [!!] {agent_name} error: {e}")
-        return -1, str(e)
+        except asyncio.TimeoutError:
+            print(f"  [!!] {agent_name} timed out after {timeout}s")
+            span.set_attribute("agent.return_code", -1)
+            span.set_attribute("agent.error", "timeout")
+            return -1, f"Agent timed out after {timeout} seconds"
+        except Exception as e:
+            print(f"  [!!] {agent_name} error: {e}")
+            span.record_exception(e)
+            span.set_attribute("agent.return_code", -1)
+            return -1, str(e)
 
 
 def _make_finding_key(finding: dict) -> str:
@@ -150,18 +184,29 @@ async def run_pipeline(scan: ScanRecord):
         4. Risk Profiler - OWASP risk scoring
         5. Compliance    - PCI-DSS 4.0 mapping
     """
-    try:
-        await _run_pipeline_inner(scan)
-    except Exception as e:
-        error_msg = f"Pipeline crashed: {type(e).__name__}: {e}"
-        tb = traceback.format_exc()
-        print(f"\n  [!!] {error_msg}")
-        print(f"  [!!] Traceback:\n{tb}")
+    with tracer.start_as_current_span("pipeline.run", attributes={
+        "scan.id": scan.id,
+        "scan.repository": scan.repository_path,
+        "scan.dry_run": scan.dry_run,
+    }) as span:
         try:
-            scan.set_error(error_msg)
-            scan_store.save(scan)
-        except Exception as save_err:
-            print(f"  [!!] Failed to save error state: {save_err}")
+            await _run_pipeline_inner(scan)
+            span.set_attribute("scan.status", "COMPLETED")
+            span.set_attribute("scan.total_findings", scan.total_findings)
+            span.set_attribute("scan.confirmed_findings", scan.confirmed_findings)
+        except Exception as e:
+            error_msg = f"Pipeline crashed: {type(e).__name__}: {e}"
+            tb = traceback.format_exc()
+            print(f"\n  [!!] {error_msg}")
+            print(f"  [!!] Traceback:\n{tb}")
+            span.set_attribute("scan.status", "FAILED")
+            span.set_attribute("scan.error", error_msg)
+            span.record_exception(e)
+            try:
+                scan.set_error(error_msg)
+                scan_store.save(scan)
+            except Exception as save_err:
+                print(f"  [!!] Failed to save error state: {save_err}")
 
 
 async def _run_pipeline_inner(scan: ScanRecord):
