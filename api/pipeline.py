@@ -30,41 +30,33 @@ from schemas import ScanStatus
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
-from opentelemetry.sdk.resources import Resource
 
-def _parse_appinsights_cs(cs: str) -> dict:
-    """Parse Application Insights connection string into components."""
-    parts = {}
-    for pair in cs.split(";"):
-        if "=" in pair:
-            key, _, value = pair.partition("=")
-            parts[key.strip()] = value.strip() if key.strip() != "AccountKey" else pair.split("=", 1)[1].strip()
-    return parts
+# Monkey-patch: azure-monitor-opentelemetry-exporter imports LogData from
+# opentelemetry.sdk._logs, but newer SDK versions removed it. Patch before import.
+try:
+    from opentelemetry.sdk._logs import LogData  # noqa: F401
+except ImportError:
+    import opentelemetry.sdk._logs as _logs_mod
+    class _LogDataStub:
+        """Stub for removed LogData class — only needed to satisfy import chain."""
+        pass
+    _logs_mod.LogData = _LogDataStub
+    print("  [tracing] Patched missing LogData for azure-monitor compatibility")
 
 try:
+    from azure.monitor.opentelemetry.exporter import AzureMonitorTraceExporter
+
     APP_INSIGHTS_CS = os.environ.get("APPLICATIONINSIGHTS_CONNECTION_STRING", "")
     if APP_INSIGHTS_CS:
-        from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-
-        cs_parts = _parse_appinsights_cs(APP_INSIGHTS_CS)
-        ingestion_ep = cs_parts.get("IngestionEndpoint", "").rstrip("/")
-        ikey = cs_parts.get("InstrumentationKey", "")
-
-        otlp_endpoint = f"{ingestion_ep}/v2.1/track"
-        resource = Resource.create({"service.name": "devsecops-guardian-api"})
-        provider = TracerProvider(resource=resource)
-        exporter = OTLPSpanExporter(
-            endpoint=otlp_endpoint,
-            headers={"x-ms-instrumentationkey": ikey},
-        )
+        provider = TracerProvider()
+        exporter = AzureMonitorTraceExporter(connection_string=APP_INSIGHTS_CS)
         provider.add_span_processor(SimpleSpanProcessor(exporter))
         trace.set_tracer_provider(provider)
-        print(f"  [tracing] OpenTelemetry OTLP tracing enabled → {ingestion_ep}")
-        print(f"  [tracing] InstrumentationKey: {ikey[:8]}...")
+        print("  [tracing] Azure Monitor tracing enabled (AzureMonitorTraceExporter)")
     else:
         print("  [tracing] APPLICATIONINSIGHTS_CONNECTION_STRING not set, tracing spans are local-only")
 except (ImportError, Exception) as e:
-    print(f"  [tracing] OpenTelemetry OTLP exporter unavailable ({e}), tracing disabled")
+    print(f"  [tracing] Azure Monitor exporter unavailable ({e}), tracing disabled")
 
 tracer = trace.get_tracer("devsecops-guardian-pipeline")
 

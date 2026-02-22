@@ -24,8 +24,8 @@ RUN pip install --no-cache-dir "mcp[cli]>=1.0.0"
 COPY api/requirements.txt /tmp/api-reqs.txt
 RUN pip install --no-cache-dir -r /tmp/api-reqs.txt
 
-# Install OTLP exporter for Application Insights (avoids azure-monitor version conflicts)
-RUN pip install --no-cache-dir "opentelemetry-exporter-otlp-proto-http"
+# azure-monitor-opentelemetry-exporter is installed via agent-framework deps;
+# LogData import compat is handled by monkey-patch in pipeline.py
 
 # Copy application code
 COPY agents/ /app/agents/
