@@ -10,8 +10,13 @@ const path = require('path');
 
 const DOCS_DIR = path.join(__dirname, '..', 'uploads', 'documents');
 
-// VULNERABLE: Path Traversal - user input used directly in file path
-// GET /api/documents/download?file=../../../etc/passwd
+// Helper function to prevent path traversal by ensuring resolved path is within DOCS_DIR
+function isPathInsideBaseDir(baseDir, targetPath) {
+  const relative = path.relative(baseDir, targetPath);
+  return !!relative && !relative.startsWith('..') && !path.isAbsolute(relative);
+}
+
+// GET /api/documents/download?file=...
 router.get('/download', (req, res) => {
   const { file } = req.query;
 
@@ -19,15 +24,19 @@ router.get('/download', (req, res) => {
     return res.status(400).json({ error: 'File parameter is required' });
   }
 
-  // VULNERABLE: No path sanitization - attacker can use ../../ to escape
-  const filePath = path.join(DOCS_DIR, file);
+  // Resolve the absolute path of the requested file
+  const filePath = path.resolve(DOCS_DIR, file);
+
+  // SECURITY FIX: Validate that resolved filePath is inside DOCS_DIR to prevent path traversal
+  if (!isPathInsideBaseDir(DOCS_DIR, filePath)) {
+    return res.status(400).json({ error: 'Invalid file path' });
+  }
 
   try {
     if (!fs.existsSync(filePath)) {
       return res.status(404).json({ error: 'Document not found' });
     }
 
-    // Serves any file the process can read, including /etc/passwd, .env, etc.
     res.sendFile(filePath);
   } catch (err) {
     res.status(500).json({ error: 'Failed to retrieve document' });
@@ -42,7 +51,12 @@ router.get('/preview', (req, res) => {
     return res.status(400).json({ error: 'File parameter is required' });
   }
 
-  const filePath = path.join(DOCS_DIR, file);
+  const filePath = path.resolve(DOCS_DIR, file);
+
+  // SECURITY FIX: Validate that resolved filePath is inside DOCS_DIR to prevent path traversal
+  if (!isPathInsideBaseDir(DOCS_DIR, filePath)) {
+    return res.status(400).json({ error: 'Invalid file path' });
+  }
 
   try {
     const content = fs.readFileSync(filePath, 'utf-8');
