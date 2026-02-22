@@ -67,17 +67,22 @@ router.post('/promote/:id', authenticateToken, (req, res) => {
 });
 
 // VULN #16: Bulk Data Export Without Pagination or Rate Limiting (CWE-770)
-// Returns ALL records - denial of service / data exfiltration
-router.get('/export-all', (req, res) => {
+// FIX: Added authenticateToken middleware and admin role check to restrict access
+// Prevents unauthorized data exfiltration of sensitive user, account, and transaction data
+router.get('/export-all', authenticateToken, (req, res) => {
+  // Authorization check: only allow admin users
+  if (!req.user || req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Forbidden: Admins only' });
+  }
+
   const db = getDatabase();
-  const users = db.prepare('SELECT * FROM users').all();
-  const accounts = db.prepare('SELECT * FROM accounts').all();
+  const users = db.prepare('SELECT id, username, email, role FROM users').all(); // Exclude password hashes
+  const accounts = db.prepare('SELECT id, user_id, account_type FROM accounts').all(); // Exclude balances
   const transactions = db.prepare('SELECT * FROM transactions').all();
 
-  // No pagination, no rate limiting, no auth
   res.json({
-    users: users,           // Includes password hashes
-    accounts: accounts,     // Includes balances
+    users: users,
+    accounts: accounts,
     transactions: transactions,
     exported_at: new Date().toISOString(),
   });
