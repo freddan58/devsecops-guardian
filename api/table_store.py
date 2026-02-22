@@ -283,6 +283,21 @@ class TableScanStore:
             self._client.upsert_entity(entity)
         except Exception as e:
             print(f"  [!] Failed to save scan {scan.id}: {e}")
+            # Log entity sizes for debugging
+            for key, val in entity.items():
+                if isinstance(val, str) and len(val) > 1000:
+                    print(f"  [!]   {key}: {len(val)} chars")
+            # Retry without large outputs
+            try:
+                entity["scanner_output"] = _truncate(None)
+                entity["analyzer_output"] = _truncate(None)
+                entity["fixer_output"] = _truncate(None)
+                entity["risk_profile_output"] = _truncate(None)
+                entity["compliance_output"] = _truncate(None)
+                self._client.upsert_entity(entity)
+                print(f"  [!] Saved scan {scan.id} without outputs (too large)")
+            except Exception as e2:
+                print(f"  [!] Retry save also failed: {e2}")
 
     def create(
         self,

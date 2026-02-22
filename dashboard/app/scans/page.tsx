@@ -25,14 +25,10 @@ export default function ScansPage() {
 
   useEffect(() => {
     fetchScans();
-    // Poll every 3 seconds if any scan is in progress
-    const interval = setInterval(() => {
-      if (scans.some((s) => !["COMPLETED", "FAILED"].includes(s.status))) {
-        fetchScans();
-      }
-    }, 3000);
+    const interval = setInterval(fetchScans, 5000);
     return () => clearInterval(interval);
-  }, [fetchScans, scans]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="p-6 max-w-7xl mx-auto">

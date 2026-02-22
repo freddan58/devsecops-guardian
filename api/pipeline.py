@@ -8,6 +8,7 @@ but adapted for FastAPI BackgroundTasks.
 import asyncio
 import os
 import sys
+import traceback
 
 from config import (
     AGENTS_DIR,
@@ -149,6 +150,22 @@ async def run_pipeline(scan: ScanRecord):
         4. Risk Profiler - OWASP risk scoring
         5. Compliance    - PCI-DSS 4.0 mapping
     """
+    try:
+        await _run_pipeline_inner(scan)
+    except Exception as e:
+        error_msg = f"Pipeline crashed: {type(e).__name__}: {e}"
+        tb = traceback.format_exc()
+        print(f"\n  [!!] {error_msg}")
+        print(f"  [!!] Traceback:\n{tb}")
+        try:
+            scan.set_error(error_msg)
+            scan_store.save(scan)
+        except Exception as save_err:
+            print(f"  [!!] Failed to save error state: {save_err}")
+
+
+async def _run_pipeline_inner(scan: ScanRecord):
+    """Inner pipeline logic (wrapped by run_pipeline for error handling)."""
     scan_dir = os.path.join(REPORTS_DIR, scan.id)
     os.makedirs(scan_dir, exist_ok=True)
 
@@ -206,13 +223,26 @@ async def run_pipeline(scan: ScanRecord):
         scan_store.save(scan)
         return
     scan.set_stage("analyzer", "completed")
+
+    # Log file existence and size for debugging
+    if os.path.exists(analyzer_out):
+        fsize = os.path.getsize(analyzer_out)
+        print(f"  [>] Analyzer output: {analyzer_out} ({fsize} bytes)")
+    else:
+        print(f"  [>] Analyzer output NOT found: {analyzer_out}")
+
     scan.load_output("analyzer", analyzer_out)
+    print(f"  [>] analyzer_output loaded: {scan.analyzer_output is not None}")
+
     scan_store.save(scan)
+    print(f"  [>] Scan saved after analyzer. Status: {scan.status.value}")
 
     if not os.path.exists(analyzer_out):
         scan.set_error("Analyzer output file not found")
         scan_store.save(scan)
         return
+
+    print(f"  [>] Advancing to FIXER stage...")
 
     # ---- STAGE 3: FIXER ----
     scan.update_status(ScanStatus.FIXING, "fixer")

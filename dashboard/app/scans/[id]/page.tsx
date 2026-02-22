@@ -30,13 +30,10 @@ export default function ScanDetailPage() {
 
   useEffect(() => {
     fetchScan();
-    const interval = setInterval(() => {
-      if (scan && !["COMPLETED", "FAILED"].includes(scan.status)) {
-        fetchScan();
-      }
-    }, 3000);
+    const interval = setInterval(fetchScan, 3000);
     return () => clearInterval(interval);
-  }, [fetchScan, scan]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scanId]);
 
   if (loading) {
     return (
