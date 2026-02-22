@@ -40,11 +40,11 @@ try:
         exporter = AzureMonitorTraceExporter(connection_string=APP_INSIGHTS_CS)
         provider.add_span_processor(SimpleSpanProcessor(exporter))
         trace.set_tracer_provider(provider)
-        logging.info("OpenTelemetry tracing enabled with Application Insights")
+        print("  [tracing] OpenTelemetry tracing enabled with Application Insights")
     else:
-        logging.info("APPLICATIONINSIGHTS_CONNECTION_STRING not set, tracing spans are local-only")
+        print("  [tracing] APPLICATIONINSIGHTS_CONNECTION_STRING not set, tracing spans are local-only")
 except ImportError:
-    logging.info("azure-monitor-opentelemetry-exporter not installed, tracing disabled")
+    print("  [tracing] azure-monitor-opentelemetry-exporter not installed, tracing disabled")
 
 tracer = trace.get_tracer("devsecops-guardian-pipeline")
 

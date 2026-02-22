@@ -1,0 +1,419 @@
+# DevSecOps Guardian - AI Security Pipeline (GitHub Actions)
+# ============================================================
+# 5-agent AI security pipeline for banking applications.
+#
+# Flow: Scanner -> Analyzer -> Fixer -> Risk Profiler -> Compliance -> Build -> Deploy
+#
+# Triggers:
+#   - Push to main  -> Full pipeline (all agents + build + deploy)
+#   - Pull request   -> Scan + Analyze only (no fixes, no deploy)
+#   - Manual dispatch -> Full pipeline with configurable scan path
+#
+# Required secrets (configure in GitHub > Settings > Secrets):
+#   AZURE_OPENAI_ENDPOINT              - Azure OpenAI endpoint URL
+#   AZURE_OPENAI_API_KEY               - Azure OpenAI API key
+#   FOUNDRY_ENDPOINT                   - Azure AI Foundry project endpoint
+#   ACR_LOGIN_SERVER                   - ACR login server (acrdevsecopsguardian-xxx.azurecr.io)
+#   ACR_USERNAME                       - ACR admin username
+#   ACR_PASSWORD                       - ACR admin password
+#   AZURE_CREDENTIALS                  - Azure service principal JSON for az login
+#   AZURE_STORAGE_CONNECTION_STRING    - Azure Table Storage connection string
+#   APPLICATIONINSIGHTS_CONNECTION_STRING - App Insights connection string
+
+name: "DevSecOps Guardian - Security Pipeline"
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      scan_path:
+        description: 'Directory to scan'
+        required: false
+        default: 'demo-app'
+
+env:
+  PYTHON_VERSION: '3.12'
+  AZURE_OPENAI_DEPLOYMENT: 'gpt-4.1-mini'
+  AZURE_OPENAI_API_VERSION: '2024-12-01-preview'
+  MODEL_DEPLOYMENT: 'gpt-4.1-mini'
+  GITHUB_OWNER: 'freddan58'
+  GITHUB_REPO: 'devsecops-guardian'
+  SCAN_PATH: ${{ github.event.inputs.scan_path || 'demo-app' }}
+  RESOURCE_GROUP: 'rg-devsecops-guardian'
+  API_APP_NAME: 'ca-api-gateway'
+  DASHBOARD_APP_NAME: 'ca-dashboard'
+
+jobs:
+  # ============================================================
+  # AGENT 1: Security Scanner
+  # ============================================================
+  scanner:
+    name: "Agent 1: Security Scanner"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          pip install -r agents/scanner/requirements.txt
+
+      - name: Run Security Scanner
+        env:
+          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+          AZURE_OPENAI_DEPLOYMENT: ${{ env.AZURE_OPENAI_DEPLOYMENT }}
+          AZURE_OPENAI_API_VERSION: ${{ env.AZURE_OPENAI_API_VERSION }}
+          FOUNDRY_ENDPOINT: ${{ secrets.FOUNDRY_ENDPOINT }}
+          MODEL_DEPLOYMENT: ${{ env.MODEL_DEPLOYMENT }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_OWNER: ${{ env.GITHUB_OWNER }}
+          GITHUB_REPO: ${{ env.GITHUB_REPO }}
+        run: |
+          cd agents/scanner
+          mkdir -p reports
+          python scanner.py \
+            --path ${{ env.SCAN_PATH }} \
+            --output reports/scanner-output.json
+          echo "Scanner output:"
+          python -c "import json; d=json.load(open('reports/scanner-output.json')); print(f'  Findings: {d.get(\"total_findings\", len(d.get(\"findings\", [])))}')"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scanner-output
+          path: agents/scanner/reports/scanner-output.json
+          retention-days: 30
+
+  # ============================================================
+  # AGENT 2: Vulnerability Analyzer
+  # ============================================================
+  analyzer:
+    name: "Agent 2: Vulnerability Analyzer"
+    needs: scanner
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          pip install -r agents/analyzer/requirements.txt
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: scanner-output
+          path: artifacts/
+
+      - name: Run Vulnerability Analyzer
+        env:
+          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+          AZURE_OPENAI_DEPLOYMENT: ${{ env.AZURE_OPENAI_DEPLOYMENT }}
+          AZURE_OPENAI_API_VERSION: ${{ env.AZURE_OPENAI_API_VERSION }}
+          FOUNDRY_ENDPOINT: ${{ secrets.FOUNDRY_ENDPOINT }}
+          MODEL_DEPLOYMENT: ${{ env.MODEL_DEPLOYMENT }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_OWNER: ${{ env.GITHUB_OWNER }}
+          GITHUB_REPO: ${{ env.GITHUB_REPO }}
+        run: |
+          cd agents/analyzer
+          mkdir -p reports
+          python analyzer.py \
+            --input ${{ github.workspace }}/artifacts/scanner-output.json \
+            --output reports/analyzer-output.json
+          echo "Analyzer output:"
+          python -c "import json; d=json.load(open('reports/analyzer-output.json')); print(f'  Confirmed: {d.get(\"confirmed_count\", 0)}, FP: {d.get(\"false_positive_count\", 0)}')"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: analyzer-output
+          path: agents/analyzer/reports/analyzer-output.json
+          retention-days: 30
+
+  # ============================================================
+  # AGENT 3: Security Fixer (main branch only)
+  # ============================================================
+  fixer:
+    name: "Agent 3: Security Fixer"
+    needs: analyzer
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          pip install -r agents/fixer/requirements.txt
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: analyzer-output
+          path: artifacts/
+
+      - name: Run Security Fixer
+        env:
+          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+          AZURE_OPENAI_DEPLOYMENT: ${{ env.AZURE_OPENAI_DEPLOYMENT }}
+          AZURE_OPENAI_API_VERSION: ${{ env.AZURE_OPENAI_API_VERSION }}
+          FOUNDRY_ENDPOINT: ${{ secrets.FOUNDRY_ENDPOINT }}
+          MODEL_DEPLOYMENT: ${{ env.MODEL_DEPLOYMENT }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_OWNER: ${{ env.GITHUB_OWNER }}
+          GITHUB_REPO: ${{ env.GITHUB_REPO }}
+        run: |
+          cd agents/fixer
+          mkdir -p reports
+          python fixer.py \
+            --input ${{ github.workspace }}/artifacts/analyzer-output.json \
+            --output reports/fixer-output.json \
+            --dry-run
+          echo "Fixer output:"
+          python -c "import json; d=json.load(open('reports/fixer-output.json')); print(f'  Fixes: {len(d.get(\"fixes\", []))}')"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fixer-output
+          path: agents/fixer/reports/fixer-output.json
+          retention-days: 30
+
+  # ============================================================
+  # AGENT 4: Risk Profiler (main branch only)
+  # ============================================================
+  risk-profiler:
+    name: "Agent 4: Risk Profiler"
+    needs: [scanner, analyzer, fixer]
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          pip install -r agents/risk-profiler/requirements.txt
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: scanner-output
+          path: artifacts/scanner/
+      - uses: actions/download-artifact@v4
+        with:
+          name: analyzer-output
+          path: artifacts/analyzer/
+      - uses: actions/download-artifact@v4
+        with:
+          name: fixer-output
+          path: artifacts/fixer/
+
+      - name: Run Risk Profiler
+        env:
+          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+          AZURE_OPENAI_DEPLOYMENT: ${{ env.AZURE_OPENAI_DEPLOYMENT }}
+          AZURE_OPENAI_API_VERSION: ${{ env.AZURE_OPENAI_API_VERSION }}
+          FOUNDRY_ENDPOINT: ${{ secrets.FOUNDRY_ENDPOINT }}
+          MODEL_DEPLOYMENT: ${{ env.MODEL_DEPLOYMENT }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_OWNER: ${{ env.GITHUB_OWNER }}
+          GITHUB_REPO: ${{ env.GITHUB_REPO }}
+        run: |
+          cd agents/risk-profiler
+          mkdir -p reports
+          python risk_profiler.py \
+            --scanner ${{ github.workspace }}/artifacts/scanner/scanner-output.json \
+            --analyzer ${{ github.workspace }}/artifacts/analyzer/analyzer-output.json \
+            --fixer ${{ github.workspace }}/artifacts/fixer/fixer-output.json \
+            --output reports/risk-profile-output.json
+          echo "Risk Profiler output:"
+          python -c "import json; d=json.load(open('reports/risk-profile-output.json')); print(f'  Risk Level: {d.get(\"risk_level\", \"N/A\")}, Score: {d.get(\"overall_risk_score\", 0)}/100')"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: risk-profiler-output
+          path: agents/risk-profiler/reports/risk-profile-output.json
+          retention-days: 30
+
+  # ============================================================
+  # AGENT 5: Compliance Reporter (main branch only)
+  # ============================================================
+  compliance:
+    name: "Agent 5: Compliance Reporter"
+    needs: [scanner, analyzer, fixer]
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          pip install -r agents/compliance/requirements.txt
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: scanner-output
+          path: artifacts/scanner/
+      - uses: actions/download-artifact@v4
+        with:
+          name: analyzer-output
+          path: artifacts/analyzer/
+      - uses: actions/download-artifact@v4
+        with:
+          name: fixer-output
+          path: artifacts/fixer/
+
+      - name: Run Compliance Reporter
+        env:
+          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+          AZURE_OPENAI_DEPLOYMENT: ${{ env.AZURE_OPENAI_DEPLOYMENT }}
+          AZURE_OPENAI_API_VERSION: ${{ env.AZURE_OPENAI_API_VERSION }}
+          FOUNDRY_ENDPOINT: ${{ secrets.FOUNDRY_ENDPOINT }}
+          MODEL_DEPLOYMENT: ${{ env.MODEL_DEPLOYMENT }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_OWNER: ${{ env.GITHUB_OWNER }}
+          GITHUB_REPO: ${{ env.GITHUB_REPO }}
+        run: |
+          cd agents/compliance
+          mkdir -p reports
+          python compliance.py \
+            --scanner ${{ github.workspace }}/artifacts/scanner/scanner-output.json \
+            --analyzer ${{ github.workspace }}/artifacts/analyzer/analyzer-output.json \
+            --fixer ${{ github.workspace }}/artifacts/fixer/fixer-output.json \
+            --output-json reports/compliance-output.json \
+            --output-md reports/compliance-report.md
+          echo "Compliance output:"
+          python -c "import json; d=json.load(open('reports/compliance-output.json')); print(f'  Rating: {d.get(\"overall_risk_rating\", \"N/A\")}, Findings: {len(d.get(\"findings\", []))}')"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: compliance-reports
+          path: |
+            agents/compliance/reports/compliance-output.json
+            agents/compliance/reports/compliance-report.md
+          retention-days: 30
+
+  # ============================================================
+  # BUILD: Docker images -> ACR (main branch only)
+  # ============================================================
+  build:
+    name: "Build & Push Docker Images"
+    needs: [compliance, risk-profiler]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Login to ACR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.ACR_LOGIN_SERVER }}
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
+
+      - name: Build & Push API Gateway
+        run: |
+          docker build -f api/Dockerfile -t ${{ secrets.ACR_LOGIN_SERVER }}/api-gateway:${{ github.run_number }} -t ${{ secrets.ACR_LOGIN_SERVER }}/api-gateway:latest .
+          docker push ${{ secrets.ACR_LOGIN_SERVER }}/api-gateway:${{ github.run_number }}
+          docker push ${{ secrets.ACR_LOGIN_SERVER }}/api-gateway:latest
+
+      - name: Build & Push Dashboard
+        run: |
+          docker build -f dashboard/Dockerfile --build-arg NEXT_PUBLIC_API_URL=https://ca-api-gateway.agreeablesand-6566841b.eastus.azurecontainerapps.io -t ${{ secrets.ACR_LOGIN_SERVER }}/dashboard:${{ github.run_number }} -t ${{ secrets.ACR_LOGIN_SERVER }}/dashboard:latest dashboard/
+          docker push ${{ secrets.ACR_LOGIN_SERVER }}/dashboard:${{ github.run_number }}
+          docker push ${{ secrets.ACR_LOGIN_SERVER }}/dashboard:latest
+
+  # ============================================================
+  # DEPLOY: Update Azure Container Apps (main branch only)
+  # ============================================================
+  deploy:
+    name: "Deploy to Azure"
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Deploy API Gateway
+        run: |
+          az containerapp update \
+            --name ${{ env.API_APP_NAME }} \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --image ${{ secrets.ACR_LOGIN_SERVER }}/api-gateway:${{ github.run_number }}
+
+      - name: Deploy Dashboard
+        run: |
+          az containerapp update \
+            --name ${{ env.DASHBOARD_APP_NAME }} \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --image ${{ secrets.ACR_LOGIN_SERVER }}/dashboard:${{ github.run_number }}
+
+  # ============================================================
+  # SUMMARY: Pipeline results
+  # ============================================================
+  summary:
+    name: "Pipeline Summary"
+    needs: [scanner, analyzer, fixer, risk-profiler, compliance, build, deploy]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+        continue-on-error: true
+
+      - name: Print Summary
+        run: |
+          echo "========================================================"
+          echo "  DevSecOps Guardian - Pipeline Complete"
+          echo "========================================================"
+          echo ""
+          echo "  Trigger: ${{ github.event_name }}"
+          echo "  Branch:  ${{ github.ref_name }}"
+          echo "  Commit:  ${{ github.sha }}"
+          echo ""
+          echo "  Agent Results:"
+          if [ -f artifacts/scanner-output/scanner-output.json ]; then
+            echo "    Scanner:    $(python3 -c "import json; d=json.load(open('artifacts/scanner-output/scanner-output.json')); print(f'{d.get(\"total_findings\", 0)} findings')" 2>/dev/null || echo 'available')"
+          else
+            echo "    Scanner:    skipped"
+          fi
+          if [ -f artifacts/analyzer-output/analyzer-output.json ]; then
+            echo "    Analyzer:   $(python3 -c "import json; d=json.load(open('artifacts/analyzer-output/analyzer-output.json')); print(f'{d.get(\"confirmed_count\", 0)} confirmed')" 2>/dev/null || echo 'available')"
+          else
+            echo "    Analyzer:   skipped"
+          fi
+          if [ -f artifacts/fixer-output/fixer-output.json ]; then
+            echo "    Fixer:      $(python3 -c "import json; d=json.load(open('artifacts/fixer-output/fixer-output.json')); print(f'{len(d.get(\"fixes\", []))} fixes')" 2>/dev/null || echo 'available')"
+          else
+            echo "    Fixer:      skipped (PR-only or not run)"
+          fi
+          echo ""
+          echo "  Dashboard: https://ca-dashboard.agreeablesand-6566841b.eastus.azurecontainerapps.io"
+          echo "  API:       https://ca-api-gateway.agreeablesand-6566841b.eastus.azurecontainerapps.io/api/health"
+          echo "========================================================"

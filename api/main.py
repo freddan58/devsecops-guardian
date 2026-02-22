@@ -96,8 +96,11 @@ def _recover_orphaned_scans():
 
 @app.on_event("startup")
 async def startup():
-    """Ensure reports directory exists and recover orphaned scans on startup."""
+    """Ensure reports directory exists, initialize tracing, and recover orphaned scans."""
     os.makedirs(REPORTS_DIR, exist_ok=True)
+
+    # Import pipeline early to initialize OpenTelemetry tracing at startup
+    import pipeline  # noqa: F401 — triggers OTel TracerProvider setup
 
     # Recover scans that were running when the container restarted
     _recover_orphaned_scans()
