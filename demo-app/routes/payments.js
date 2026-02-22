@@ -61,11 +61,20 @@ router.post('/request', authenticateToken, (req, res) => {
 });
 
 // VULN #20: No input validation on amount (CWE-20)
-// Negative amounts, zero, NaN, extremely large numbers all accepted
+// Fixed: Added strict validation to only allow positive numbers up to a maximum limit
 router.post('/withdraw', authenticateToken, (req, res) => {
   const { amount, account_number } = req.body;
-  // No validation: amount could be negative (credit instead of debit),
-  // NaN, Infinity, or extremely large
+
+  // Validate 'amount' to ensure it is a positive number and within allowed limit
+  const maxAmount = 1000000; // Maximum withdrawal limit for example
+  if (
+    typeof amount !== 'number' ||
+    !Number.isFinite(amount) ||
+    amount <= 0 ||
+    amount > maxAmount
+  ) {
+    return res.status(400).json({ error: 'Invalid withdrawal amount' });
+  }
 
   const db = getDatabase();
   db.prepare('UPDATE accounts SET balance = balance - ? WHERE account_number = ?').run(amount, account_number);
