@@ -52,6 +52,8 @@ router.get('/ping', (req, res) => {
 // VULN #49: XML External Entity Injection (CWE-611)
 // Parses user-supplied XML without disabling external entities
 // Allows reading arbitrary files from the server filesystem
+const libxmljs = require('libxmljs'); // Use libxmljs for secure XML parsing
+
 router.post('/health-check', (req, res) => {
   const xmlData = req.body.xml || req.body;
 
@@ -59,14 +61,27 @@ router.post('/health-check', (req, res) => {
     return res.status(400).json({ error: 'XML body required' });
   }
 
-  // VULNERABLE: XML parsing with external entities enabled by default
-  // Attacker sends:
-  // <?xml version="1.0"?>
-  // <!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>
-  // <health><service>&xxe;</service></health>
-  parseString(xmlData, { explicitArray: false }, (err, result) => {
-    if (err) {
-      return res.status(400).json({ error: 'Invalid XML', details: err.message });
+  try {
+    // FIX: Use libxmljs with external entity loading disabled to prevent XXE
+    // This disables DOCTYPE and external entity processing
+    const xmlDoc = libxmljs.parseXml(xmlData, { noent: false, dtdload: false, dtdattr: false, doctype: false });
+
+    // Convert xmlDoc to JSON-like object safely
+    // We create a simple helper function to extract the root and its direct children
+    function xmlNodeToObject(node) {
+      const obj = {};
+      node.childNodes().forEach(child => {
+        if (child.type() === 'element') {
+          obj[child.name()] = child.text();
+        }
+      });
+      return obj;
+    }
+
+    const root = xmlDoc.root();
+    const result = {};
+    if (root) {
+      result[root.name()] = xmlNodeToObject(root);
     }
 
     res.json({
@@ -74,7 +89,9 @@ router.post('/health-check', (req, res) => {
       services_checked: Object.keys(result).length,
       timestamp: new Date().toISOString(),
     });
-  });
+  } catch (err) {
+    return res.status(400).json({ error: 'Invalid XML', details: err.message });
+  }
 });
 
 // VULN #50: Log Forging / Log Injection (CWE-117)
