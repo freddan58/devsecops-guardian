@@ -50,8 +50,13 @@ function insecureHeaders(req, res, next) {
   // Remove dangerous headers that disclose internal implementation details
   // Do NOT set 'X-Powered-By', 'Server', 'X-Debug-Mode'
 
-  // Preserve CORS headers as in original implementation
-  res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
+  // FIX: Only allow CORS origins from whitelist when credentials are true
+  const origin = req.headers.origin;
+  if (allowedOrigins.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  }
+  // Do not set Access-Control-Allow-Origin if origin not allowed (no wildcard '*')
+
   res.setHeader('Access-Control-Allow-Credentials', 'true');
 
   next();
