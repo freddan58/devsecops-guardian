@@ -13,7 +13,7 @@ Five specialized AI agents — **registered and running in Azure AI Foundry** �
 
 <p align="center">
   <a href="https://ca-dashboard.agreeablesand-6566841b.eastus.azurecontainerapps.io">Live Demo</a> &bull;
-  <a href="#hero-technologies">Hero Technologies</a> &bull;
+  <a href="#architecture-diagram">Architecture</a> &bull;
   <a href="#how-it-works---foundry-agent-pipeline">How It Works</a> &bull;
   <a href="#agents-in-foundry">Agents</a> &bull;
   <a href="#quick-start">Quick Start</a>
@@ -47,6 +47,103 @@ Code Push --> SecurityScanner --> VulnerabilityAnalyzer --> SecurityFixer --> Ri
               All calls route through Azure AI Foundry Responses API
               DevSecOps-Guardian-Safety guardrails applied to every interaction
               gen_ai.* telemetry captured in Application Insights
+```
+
+---
+
+## Architecture Diagram
+
+```mermaid
+flowchart TB
+    subgraph USER["Developer / Security Team"]
+        DEV["Developer<br/>Push Code"]
+        SECTEAM["Security Team<br/>Review Dashboard"]
+    end
+
+    subgraph DASHBOARD["Dashboard — Next.js 16 / React / TypeScript"]
+        UI_SCAN["Trigger Scan"]
+        UI_FINDINGS["Findings Explorer<br/>Severity / Verdict / Fix Status"]
+        UI_RISK["OWASP Radar Chart<br/>Risk Score Gauge"]
+        UI_COMPLIANCE["PCI-DSS 4.0<br/>Compliance Report"]
+        UI_COMPARE["Re-Scan Comparison<br/>NEW / RESOLVED / PERSISTENT"]
+        UI_PRACTICES["Best Practices<br/>Maturity Score"]
+    end
+
+    subgraph ACA["Azure Container Apps"]
+        subgraph API["API Gateway — FastAPI / Python"]
+            PIPELINE["Pipeline Orchestrator<br/>Sequential 5-Stage Execution"]
+            STORE["Azure Table Storage<br/>Scan Records & State"]
+            OTEL_PIPE["OpenTelemetry<br/>Pipeline Spans"]
+        end
+    end
+
+    subgraph AGENTS["5 AI Security Agents — Azure AI Foundry"]
+        direction LR
+        A1["SecurityScanner<br/>Vulnerability Detection<br/>CWE Classification"]
+        A2["VulnerabilityAnalyzer<br/>False Positive Elimination<br/>Exploitability Scoring"]
+        A3["SecurityFixer<br/>Code Fix Generation<br/>Draft PR Creation"]
+        A4["RiskProfiler<br/>OWASP Top 10 Scoring<br/>Attack Surface Analysis"]
+        A5["ComplianceReporter<br/>PCI-DSS 4.0 Mapping<br/>Audit-Ready Reports"]
+    end
+
+    subgraph FOUNDRY["Azure AI Foundry"]
+        RESP_API["Responses API v2<br/>gpt-4.1-mini"]
+        RAI["DevSecOps-Guardian-Safety<br/>RAI Guardrails"]
+        OTEL_AI["ResponsesInstrumentor<br/>gen_ai.* Spans"]
+    end
+
+    subgraph MCP_SRV["GitHub MCP Server — FastMCP"]
+        MCP_READ["Read Tools<br/>read_file, list_files<br/>read_pr_diff, get_pr"]
+        MCP_WRITE["Write Tools<br/>create_branch, create_pr<br/>create_or_update_file"]
+    end
+
+    subgraph AZURE_SVC["Azure Services"]
+        AOAI["Azure OpenAI<br/>gpt-4.1-mini"]
+        APPINS["Application Insights<br/>gen_ai.* Telemetry"]
+        ACR["Container Registry<br/>Docker Images"]
+        ATS["Azure Table Storage<br/>Scan Persistence"]
+        ADOPIPE["Azure DevOps<br/>CI/CD Pipeline"]
+    end
+
+    subgraph GITHUB["GitHub"]
+        REPO["Source Repository<br/>demo-app / 52 vulns"]
+        PRS["Draft Pull Requests<br/>Auto-generated Fixes"]
+        ISSUES["GitHub Issues<br/>Copilot Agent Ready"]
+        COPILOT["GitHub Copilot<br/>Agent Mode"]
+    end
+
+    DEV -->|push| REPO
+    SECTEAM --> DASHBOARD
+    UI_SCAN -->|POST /api/scans| PIPELINE
+    PIPELINE --> A1 --> A2 --> A3 --> A4 --> A5
+
+    A1 & A2 -->|read source files| MCP_READ
+    A3 -->|create PRs & branches| MCP_WRITE
+    MCP_READ & MCP_WRITE -->|GitHub API| REPO
+
+    A1 & A2 & A3 & A4 & A5 -->|responses.create| RESP_API
+    RESP_API --> RAI
+    RESP_API --> AOAI
+    RESP_API --> OTEL_AI --> APPINS
+
+    PIPELINE --> STORE --> ATS
+    OTEL_PIPE --> APPINS
+
+    A3 -->|draft PRs| PRS
+    A3 -->|create issues| ISSUES
+    ISSUES -->|picks up| COPILOT
+
+    PIPELINE -->|results| UI_FINDINGS & UI_RISK & UI_COMPLIANCE & UI_COMPARE & UI_PRACTICES
+
+    ADOPIPE -->|build & deploy| ACR --> ACA
+
+    style FOUNDRY fill:#1a1a2e,stroke:#7c3aed,stroke-width:2px,color:#fff
+    style AGENTS fill:#0f172a,stroke:#3b82f6,stroke-width:2px,color:#fff
+    style DASHBOARD fill:#0f172a,stroke:#22c55e,stroke-width:2px,color:#fff
+    style MCP_SRV fill:#1a1a2e,stroke:#f59e0b,stroke-width:2px,color:#fff
+    style GITHUB fill:#0f172a,stroke:#e5e7eb,stroke-width:2px,color:#fff
+    style AZURE_SVC fill:#1a1a2e,stroke:#06b6d4,stroke-width:2px,color:#fff
+    style RAI fill:#dc2626,stroke:#dc2626,color:#fff
 ```
 
 ---
@@ -152,6 +249,7 @@ Fixer Agent → Draft PR + GitHub Issue → Copilot Coding Agent → Enhanced Fi
   | Reads findings + source  |     Contextual false positive elimination
   +--------+-----------------+
            | analyzer-output.json (CONFIRMED / FALSE_POSITIVE verdicts)
+           |  ↓ Re-scan comparison computed here (NEW / RESOLVED / PERSISTENT)
            |
   +--------v---------+
   | SecurityFixer    | --> Foundry Responses API + GitHub API
@@ -173,6 +271,7 @@ Fixer Agent → Draft PR + GitHub Issue → Copilot Coding Agent → Enhanced Fi
            |
            v
   Dashboard displays results with full evidence trail
+  (Findings, Risk Radar, Compliance, Comparison Report, Best Practices)
 ```
 
 **Key point**: Every LLM call in production goes through `project.get_openai_client().responses.create()`, which routes through the **Foundry endpoint**. The agents registered in Foundry (SecurityScanner:2, VulnerabilityAnalyzer:2, etc.) have the `DevSecOps-Guardian-Safety` RAI policy applied, ensuring guardrails are enforced on all agent interactions. The `ResponsesInstrumentor` captures gen_ai.* spans that appear in both Application Insights and the Foundry Operate tab.
@@ -201,55 +300,36 @@ Each agent has:
 
 ---
 
-## Architecture
+## Dashboard Features
 
-```
-                    +----------------------------------------------+
-                    |        Dashboard (Next.js / React)            |
-                    |   ca-dashboard.....azurecontainerapps.io      |
-                    +---------------------+------------------------+
-                                          | REST API
-                    +---------------------v------------------------+
-                    |        API Gateway (FastAPI / Python)          |
-                    |   ca-api-gateway.....azurecontainerapps.io     |
-                    +--+-----+-----+-----+-----+------------------+
-                       |     |     |     |     |
-              +--------+     |     |     |     +--------+
-              v              v     |     v              v
-        +----------+  +----------+ | +----------+ +----------+
-        | Scanner  |  | Analyzer | | |  Fixer   | |Compliance|
-        |  Agent   |  |  Agent   | | |  Agent   | |  Agent   |
-        +----+-----+  +----+-----+ | +----+-----+ +----+-----+
-             |              |       |      |             |
-             |              |  +----v----+ |             |
-             |              |  |  Risk   | |             |
-             |              |  |Profiler | |             |
-             |              |  +---------+ |             |
-             +--------------+------+-------+-------------+
-                                   |
-                    +--------------v--------------+
-                    |   Azure AI Foundry           |
-                    |   Responses API (v2 SDK)     |
-                    |   DevSecOps-Guardian-Safety   |  <-- RAI Guardrails
-                    +-----+--------------+--------+
-                          |              |
-              +-----------v---+  +-------v-----------+
-              | Azure OpenAI  |  |  App Insights      |
-              | gpt-4.1-mini  |  |  gen_ai.* spans    |
-              +---------------+  +-------------------+
-```
+The Next.js dashboard provides a rich, real-time interface for security teams:
 
-### Azure Services
+| Feature | Description |
+|---------|-------------|
+| **Scan Management** | Trigger scans, cancel running scans, retry failed scans, delete old scans |
+| **Real-Time Pipeline** | Live pipeline progress bar showing each agent stage |
+| **Findings Explorer** | Filter by severity (CRITICAL/HIGH/MEDIUM/LOW), verdict (CONFIRMED/FALSE_POSITIVE), fix status |
+| **Vulnerability Detail** | Code context, analysis reasoning, attack scenarios, fixed code preview |
+| **OWASP Risk Radar** | Interactive radar chart with per-category risk scores and attack surface breakdown |
+| **Risk Score Gauge** | Visual gauge showing overall risk level (0-100) |
+| **PCI-DSS Compliance** | Requirement-by-requirement compliance mapping with evidence and remediation status |
+| **Re-Scan Comparison** | Side-by-side comparison between scans — NEW, RESOLVED, PERSISTENT findings with charts |
+| **Best Practices** | Maturity score, violations vs. followed practices, anti-pattern detection |
+| **Scan History** | Full re-scan chain tracking across multiple scans |
+
+---
+
+## Azure Services
 
 | Service | Purpose |
 |---------|---------|
 | **Azure AI Foundry** | Agent registration, Responses API routing, guardrails enforcement, Operate tab monitoring |
-| **Azure OpenAI** | gpt-4.1-mini inference for all 5 agents (via Foundry) |
+| **Azure OpenAI** | gpt-4.1-mini inference for all 5 agents (routed via Foundry) |
 | **Application Insights** | gen_ai.* telemetry from ResponsesInstrumentor, pipeline monitoring |
-| **Azure Container Apps** | Serverless hosting for API Gateway + Dashboard |
-| **Azure Container Registry** | Docker image builds and storage |
-| **Azure Table Storage** | Persistent scan records and stage outputs |
-| **Azure DevOps Pipelines** | CI/CD with 8-stage pipeline |
+| **Azure Container Apps** | Serverless hosting for API Gateway + Dashboard (auto-scaling) |
+| **Azure Container Registry** | Cloud Docker builds and image storage |
+| **Azure Table Storage** | Persistent scan records, stage outputs, and comparison data |
+| **Azure DevOps Pipelines** | CI/CD with 8-stage pipeline (lint, test, build, push, deploy) |
 
 ---
 
@@ -264,6 +344,7 @@ Each agent has:
 | **Auto-fix PRs generated** | 25+ draft PRs merged with security fixes |
 | **Compliance report** | PCI-DSS 4.0 audit-ready in seconds (vs. 2-3 weeks manual) |
 | **Risk profiling** | OWASP Top 10 scoring with per-category breakdown |
+| **Re-scan comparison** | Automatic NEW/RESOLVED/PERSISTENT classification between scans |
 | **Guardrails** | DevSecOps-Guardian-Safety applied to 100% of agent interactions |
 | **Telemetry** | Full gen_ai.* spans in App Insights for every scan |
 
@@ -277,7 +358,7 @@ A vulnerable Node.js/Express banking API (`demo-app/`) with **52 intentionally p
 
 | File | Vulnerabilities | CWEs |
 |------|----------------|------|
-| `accounts.js` | SQL Injection (FIXED) | CWE-89 |
+| `accounts.js` | SQL Injection | CWE-89 |
 | `search.js` | Reflected XSS | CWE-79 |
 | `users.js` | Missing Auth on DELETE | CWE-862 |
 | `transfers.js` | IDOR | CWE-639 |
@@ -314,10 +395,14 @@ A vulnerable Node.js/Express banking API (`demo-app/`) with **52 intentionally p
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/api/health` | Health check + agent availability |
-| `POST` | `/api/scans` | Trigger new security scan |
+| `POST` | `/api/scans` | Trigger new security scan (supports `parent_scan_id` for re-scans) |
 | `GET` | `/api/scans` | List all scans with status |
-| `GET` | `/api/scans/{id}` | Full scan detail with all agent outputs |
+| `GET` | `/api/scans/{id}` | Full scan detail with all agent outputs + comparison data |
+| `DELETE` | `/api/scans/{id}` | Delete a scan record |
+| `POST` | `/api/scans/{id}/cancel` | Cancel a running scan |
+| `POST` | `/api/scans/{id}/retry` | Retry a failed scan with same configuration |
 | `GET` | `/api/scans/{id}/findings` | Merged findings with verdicts + fix status |
+| `GET` | `/api/scans/{id}/history` | Re-scan history chain |
 | `GET` | `/api/scans/{id}/compliance` | PCI-DSS 4.0 compliance assessment |
 | `GET` | `/api/scans/{id}/risk-profile` | OWASP Top 10 risk profile |
 | `GET` | `/api/scans/{id}/practices` | Best practices analysis |
@@ -381,6 +466,7 @@ cd agents && python register_all_agents.py
 | Auto-fix | Limited languages | Version bumps | **Full code rewrites as draft PRs** |
 | Risk profiling | No | No | **OWASP Top 10 risk score per service** |
 | Compliance reporting | No | No | **PCI-DSS 4.0 audit-ready reports** |
+| Re-scan comparison | No | No | **Automatic NEW/RESOLVED/PERSISTENT tracking** |
 | Agent orchestration | Single tool | Single bot | **5 Foundry agents with guardrails** |
 | AI safety | N/A | N/A | **DevSecOps-Guardian-Safety RAI policy** |
 | Observability | Build logs | Alerts | **gen_ai.* spans in App Insights + Foundry Operate** |
@@ -394,7 +480,9 @@ cd agents && python register_all_agents.py
 devsecops-guardian/
 |-- agents/
 |   |-- scanner/              # Agent 1: LLM security scanner
-|   |   +-- llm_engine.py     # Foundry Responses API + telemetry
+|   |   |-- scanner.py        # File discovery + GitHub integration
+|   |   |-- llm_engine.py     # Foundry Responses API + telemetry
+|   |   +-- prompts.py        # Expert system prompt templates
 |   |-- analyzer/             # Agent 2: False positive eliminator
 |   |   +-- llm_engine.py     # Foundry Responses API + telemetry
 |   |-- fixer/                # Agent 3: Auto-fix PR generator
@@ -406,11 +494,25 @@ devsecops-guardian/
 |   |   +-- llm_engine.py     # Foundry Responses API + telemetry
 |   |-- register_all_agents.py # Register all 5 agents in Foundry
 |   +-- orchestrator.py       # Agent Framework orchestration
-|-- api/                      # FastAPI backend (pipeline orchestrator)
-|-- dashboard/                # Next.js frontend (React, TypeScript, Tailwind)
+|-- api/                      # FastAPI backend
+|   |-- main.py               # App startup + orphan scan recovery
+|   |-- pipeline.py           # 5-stage pipeline orchestrator + re-scan comparison
+|   |-- models.py             # ScanRecord data model
+|   |-- schemas.py            # Pydantic request/response schemas
+|   |-- table_store.py        # Azure Table Storage persistence
+|   +-- routers/              # REST API endpoints (scans, findings, compliance, risk)
+|-- dashboard/                # Next.js 16 frontend
+|   |-- app/scans/[id]/       # Scan detail, findings, risk, compliance, practices pages
+|   +-- components/
+|       |-- scans/            # PipelineStatus, ComparisonReport, NewScanDialog
+|       |-- findings/         # SeverityBadge, StatusChangeBadge, VerdictBadge
+|       +-- risk/             # OWASPRadarChart, RiskScoreGauge
 |-- demo-app/                 # Vulnerable banking API (52 planted vulns)
+|   +-- routes/               # 14 route files with CWE-classified vulnerabilities
 |-- mcp-servers/
 |   +-- github/               # GitHub MCP Server (9 tools, FastMCP)
+|-- tests/                    # Feature verification suite
+|-- scripts/                  # Utility scripts + evaluation datasets
 |-- .github/
 |   +-- copilot-instructions.md
 |-- azure-pipelines.yml       # 8-stage CI/CD pipeline
@@ -430,7 +532,7 @@ devsecops-guardian/
 | **MCP** | Custom GitHub MCP Server (FastMCP, 9 tools) |
 | **Copilot** | GitHub Copilot Agent Mode + Issue Creator |
 | **API** | FastAPI, uvicorn, Pydantic |
-| **Dashboard** | Next.js 16, React, TypeScript, Tailwind CSS, Recharts |
+| **Dashboard** | Next.js 16, React 19, TypeScript, Tailwind CSS 4, Recharts |
 | **Infrastructure** | Azure Container Apps, Azure Container Registry, Azure Table Storage |
 | **CI/CD** | Azure DevOps Pipelines (YAML, 8 stages) |
 

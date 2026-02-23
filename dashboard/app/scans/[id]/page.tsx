@@ -7,6 +7,7 @@ import { getScan, type ScanDetail } from "@/lib/api";
 import { formatDate } from "@/lib/utils";
 import { PipelineStatus } from "@/components/scans/PipelineStatus";
 import { NewScanDialog } from "@/components/scans/NewScanDialog";
+import { ComparisonReport } from "@/components/scans/ComparisonReport";
 
 export default function ScanDetailPage() {
   const params = useParams();
@@ -102,41 +103,10 @@ export default function ScanDetailPage() {
         </button>
       </div>
 
-      {/* Comparison Banner */}
+      {/* Comparison Report */}
       {scan.comparison && (
-        <div className="card mb-6 border-blue-500/30 bg-blue-500/5">
-          <div className="flex items-center gap-3 mb-3">
-            <svg className="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-            </svg>
-            <h3 className="text-sm font-medium text-blue-400">
-              Comparison with Parent Scan
-            </h3>
-            <Link
-              href={`/scans/${scan.comparison.parent_scan_id}`}
-              className="text-xs text-slate-400 hover:text-blue-400 transition-colors ml-auto"
-            >
-              View parent scan &rarr;
-            </Link>
-          </div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <div>
-              <div className="text-xs text-slate-400 uppercase tracking-wide mb-1">New</div>
-              <div className="text-xl font-bold text-red-400">+{scan.comparison.new_findings}</div>
-            </div>
-            <div>
-              <div className="text-xs text-slate-400 uppercase tracking-wide mb-1">Resolved</div>
-              <div className="text-xl font-bold text-green-400">-{scan.comparison.resolved_findings}</div>
-            </div>
-            <div>
-              <div className="text-xs text-slate-400 uppercase tracking-wide mb-1">Persistent</div>
-              <div className="text-xl font-bold text-yellow-400">{scan.comparison.persistent_findings}</div>
-            </div>
-            <div>
-              <div className="text-xs text-slate-400 uppercase tracking-wide mb-1">Regressions</div>
-              <div className="text-xl font-bold text-orange-400">{scan.comparison.regression_findings}</div>
-            </div>
-          </div>
+        <div className="mb-6">
+          <ComparisonReport comparison={scan.comparison} />
         </div>
       )}
 
