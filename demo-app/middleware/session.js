@@ -38,19 +38,22 @@ function createSession(userId, userData) {
   return sessionId;
 }
 
-// VULN #38: Session Fixation (CWE-384)
-// Accepts pre-defined session IDs from client without regeneration
+// FIXED VULN #38: Session Fixation (CWE-384)
+// Always create a new session; do NOT accept client-supplied session IDs to prevent fixation
 function validateSession(sessionId) {
-  // If session doesn't exist, create it (session fixation!)
-  // Attacker sets session cookie, victim authenticates, attacker has valid session
-  if (!sessions[sessionId]) {
-    sessions[sessionId] = {
-      userId: null,
-      data: {},
-      created: Date.now(),
-    };
+  // Do not accept pre-existing sessionId from client to avoid session fixation
+  // If sessionId exists and logged in session, return it
+  if (sessionId && sessions[sessionId] && sessions[sessionId].userId !== null) {
+    return sessions[sessionId];
   }
-  return sessions[sessionId];
+  // Otherwise, create a new unauthenticated session with a secure random session ID
+  const newSessionId = crypto.randomBytes(32).toString('hex'); // cryptographically strong ID
+  sessions[newSessionId] = {
+    userId: null,
+    data: {},
+    created: Date.now(),
+  };
+  return sessions[newSessionId];
 }
 
 function attachUserToSession(sessionId, userId, userData) {
