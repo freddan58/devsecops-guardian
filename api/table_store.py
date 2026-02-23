@@ -441,6 +441,19 @@ class TableScanStore:
 
         return chain
 
+    def delete(self, scan_id: str) -> bool:
+        """Delete a scan record from Table Storage."""
+        if not self._client:
+            return False
+        try:
+            self._client.delete_entity("scans", scan_id)
+            return True
+        except ResourceNotFoundError:
+            return False
+        except Exception as e:
+            print(f"  [!] Failed to delete scan {scan_id}: {e}")
+            return False
+
     def count(self) -> int:
         """Count total scans."""
         return len(self.list_all())

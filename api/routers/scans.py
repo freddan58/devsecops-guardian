@@ -77,6 +77,25 @@ async def cancel_scan(scan_id: str):
     return ScanSummary(**scan.to_summary())
 
 
+@router.delete("/{scan_id}", status_code=204)
+async def delete_scan(scan_id: str):
+    """Delete a scan record."""
+    scan = scan_store.get(scan_id)
+    if not scan:
+        raise HTTPException(status_code=404, detail=f"Scan {scan_id} not found")
+
+    if scan.status == ScanStatus.RUNNING:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot delete a running scan. Cancel it first.",
+        )
+
+    deleted = scan_store.delete(scan_id)
+    if not deleted:
+        raise HTTPException(status_code=500, detail="Failed to delete scan")
+    return
+
+
 @router.post("/{scan_id}/retry", response_model=ScanSummary, status_code=202)
 async def retry_scan(
     scan_id: str,

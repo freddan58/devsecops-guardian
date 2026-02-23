@@ -203,6 +203,13 @@ class ScanStore:
             reverse=True,
         )
 
+    def delete(self, scan_id: str) -> bool:
+        """Delete a scan record."""
+        if scan_id in self._scans:
+            del self._scans[scan_id]
+            return True
+        return False
+
     def count(self) -> int:
         return len(self._scans)
 
