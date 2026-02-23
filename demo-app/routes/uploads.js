@@ -133,9 +133,9 @@ router.post('/import-xml', authenticateToken, (req, res) => {
 router.get('/callback', (req, res) => {
   const { redirect_url } = req.query;
 
-  // No validation of redirect target
-  // Attacker: /api/uploads/callback?redirect_url=https://evil.com/phishing
-  if (redirect_url) {
+  // Fix: Validate redirect_url to allow only relative paths to prevent open redirect attacks
+  // Reject absolute URLs or external domains
+  if (redirect_url && typeof redirect_url === 'string' && redirect_url.startsWith('/') && !redirect_url.startsWith('//')) {
     res.redirect(redirect_url);
   } else {
     res.redirect('/');
