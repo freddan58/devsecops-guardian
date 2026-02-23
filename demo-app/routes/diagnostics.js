@@ -113,21 +113,51 @@ router.post('/import-config', (req, res) => {
   }
 
   try {
-    // VULNERABLE: No size limit on decompressed output
-    // A 1KB gzip payload can decompress to 1GB+ (gzip bomb)
-    // This will exhaust server memory and crash the process
     const buffer = Buffer.from(compressedData, 'base64');
-    const decompressed = zlib.gunzipSync(buffer);
 
-    // Process the entire decompressed content in memory
-    const config = JSON.parse(decompressed.toString('utf-8'));
+    // Fixed: Streaming decompression with size limit to prevent zip bomb attacks
+    // Prevents decompressing files larger than MAX_DECOMPRESSED_SIZE
+    const MAX_DECOMPRESSED_SIZE = 10 * 1024 * 1024; // 10 MB limit for decompressed data
 
-    res.json({
-      message: 'Config imported successfully',
-      keys: Object.keys(config),
-      size_compressed: buffer.length,
-      size_decompressed: decompressed.length,
+    let totalLength = 0;
+    const chunks = [];
+
+    // Use streaming gunzip to decompress with controlled memory usage
+    const gunzip = zlib.createGunzip();
+    gunzip.on('data', (chunk) => {
+      totalLength += chunk.length;
+      if (totalLength > MAX_DECOMPRESSED_SIZE) {
+        // Abort decompression to prevent resource exhaustion
+        gunzip.destroy(new Error('Decompressed data size limit exceeded'));
+      } else {
+        chunks.push(chunk);
+      }
     });
+
+    gunzip.on('error', (err) => {
+      // Handle decompression errors including size limit breaches
+      return res.status(400).json({ error: 'Import failed', details: err.message });
+    });
+
+    gunzip.on('end', () => {
+      try {
+        const decompressed = Buffer.concat(chunks);
+        const config = JSON.parse(decompressed.toString('utf-8'));
+
+        res.json({
+          message: 'Config imported successfully',
+          keys: Object.keys(config),
+          size_compressed: buffer.length,
+          size_decompressed: decompressed.length,
+        });
+      } catch (err) {
+        res.status(400).json({ error: 'Import failed', details: err.message });
+      }
+    });
+
+    // Start streaming decompression
+    gunzip.end(buffer);
+
   } catch (err) {
     res.status(400).json({ error: 'Import failed', details: err.message });
   }
