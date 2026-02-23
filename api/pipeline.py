@@ -291,6 +291,16 @@ async def _run_pipeline_inner(scan: ScanRecord):
     scan.load_output("analyzer", analyzer_out)
     print(f"  [>] analyzer_output loaded: {scan.analyzer_output is not None}")
 
+    # ---- COMPARISON (early): compute right after analyzer so it survives late-stage failures ----
+    if scan.parent_scan_id and scan.analyzer_output:
+        parent = scan_store.get(scan.parent_scan_id)
+        if parent and parent.analyzer_output:
+            comparison = _compare_scans(parent, scan)
+            scan.comparison = comparison
+            print(f"  [>] Re-scan comparison (early): {comparison.get('new_findings', 0)} new, "
+                  f"{comparison.get('resolved_findings', 0)} resolved, "
+                  f"{comparison.get('persistent_findings', 0)} persistent")
+
     scan_store.save(scan)
     print(f"  [>] Scan saved after analyzer. Status: {scan.status.value}")
 
