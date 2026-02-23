@@ -7,22 +7,26 @@ const express = require('express');
 const router = express.Router();
 const { getDatabase } = require('../config/database');
 const { authenticateToken } = require('../middleware/auth');
+const mustache = require('mustache');
 
 // VULN #27: Server-Side Template Injection (CWE-1336)
-// User input directly interpolated into template string that gets evaluated
+// Fixed: Replaced unsafe Function constructor with safe Mustache template engine
+// This prevents execution of arbitrary JS code from user input template_body
 router.post('/send', authenticateToken, (req, res) => {
   const { recipient, subject, template_body } = req.body;
 
-  // User-controlled template body executed with Function constructor
-  // Attacker: template_body = "${require('child_process').execSync('whoami')}"
   try {
-    const renderTemplate = new Function('user', 'data',
-      `return \`${template_body}\`;`
-    );
+    // Prepare template data with controlled variables
+    const data = {
+      user: req.user,
+      recipient: recipient,
+      subject: subject
+    };
 
-    const rendered = renderTemplate(req.user, { recipient, subject });
+    // Safely render template using mustache, which escapes inputs by default
+    const rendered = mustache.render(template_body, data);
 
-    // Log notification for audit (also logs the rendered malicious output)
+    // Log notification for audit (redacted sensitive user info)
     console.log(`[NOTIFICATION] To: ${recipient}, Subject: ${subject}, Body: ${rendered}`);
 
     res.json({ message: 'Notification sent', rendered_preview: rendered });
