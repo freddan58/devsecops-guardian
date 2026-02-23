@@ -5,18 +5,17 @@ Sends the full pipeline data (Scanner + Analyzer + Fixer)
 to Azure OpenAI for OWASP Top 10 risk profiling.
 Single LLM call with all findings for holistic analysis.
 
-Supports three modes (tried in order):
-1. Foundry Threads/Runs (FOUNDRY_ENDPOINT set): Creates agent threads visible
-   in Foundry Operate tab with full run tracking and telemetry.
-2. Foundry Responses API (fallback): Routes calls through Azure AI Foundry
-   for telemetry via ResponsesInstrumentor.
-3. Direct mode (fallback): Uses httpx to call Azure OpenAI directly.
+Supports two modes:
+- Foundry mode (FOUNDRY_ENDPOINT set): Routes calls through Azure AI Foundry
+  Responses API. The Foundry "prompt" agents (RiskProfiler:2 etc.) apply
+  guardrails (DevSecOps-Guardian-Safety) and evaluations automatically.
+  ResponsesInstrumentor captures gen_ai.* spans for App Insights / Operate tab.
+- Direct mode (fallback): Uses httpx to call Azure OpenAI directly.
 """
 
 import asyncio
 import json
 import os
-import time
 import httpx
 
 from config import (
@@ -31,16 +30,19 @@ from prompts import RISK_PROFILER_SYSTEM_PROMPT, RISK_PROFILER_USER_PROMPT
 FOUNDRY_ENDPOINT = os.getenv("FOUNDRY_ENDPOINT", "")
 MODEL_DEPLOYMENT = os.getenv("MODEL_DEPLOYMENT", "gpt-4.1-mini")
 FOUNDRY_AGENT_NAME = "RiskProfiler"
-FOUNDRY_ASSISTANT_ID = os.getenv("FOUNDRY_RISKPROFILER_ASSISTANT_ID", "asst_AxefKXZBcEVihT1iATJw6KrL")
-FOUNDRY_API_VERSION = os.getenv("FOUNDRY_API_VERSION", "2025-05-01")
 
-_foundry_client = None
 _foundry_openai = None
 _tracing_initialized = False
 
 
 def _init_tracing():
-    """Initialize OpenTelemetry tracing + ResponsesInstrumentor for Foundry telemetry."""
+    """Initialize OpenTelemetry tracing + ResponsesInstrumentor for Foundry telemetry.
+
+    Sets up:
+    1. TracerProvider with AzureMonitorTraceExporter (if App Insights configured)
+    2. azure-core tracing implementation for SDK-level spans
+    3. ResponsesInstrumentor to capture gen_ai.* spans from responses.create()
+    """
     global _tracing_initialized
     if _tracing_initialized:
         return
@@ -80,125 +82,39 @@ def _init_tracing():
         print(f"  [Foundry] Tracing setup warning: {e}")
 
 
-def _get_foundry_client():
-    """Get AIProjectClient for Foundry thread/run REST calls (cached)."""
-    global _foundry_client
-    if _foundry_client is None:
-        _init_tracing()
-        from azure.ai.projects import AIProjectClient
-        from azure.identity import DefaultAzureCredential
-        _foundry_client = AIProjectClient(
-            endpoint=FOUNDRY_ENDPOINT,
-            credential=DefaultAzureCredential(),
-        )
-        print(f"  [Foundry] AIProjectClient initialized for {FOUNDRY_AGENT_NAME}")
-    return _foundry_client
-
-
 def _get_foundry_openai():
     """Get OpenAI client configured for Foundry project (cached)."""
     global _foundry_openai
     if _foundry_openai is None:
-        client = _get_foundry_client()
-        _foundry_openai = client.get_openai_client()
+        _init_tracing()
+        from azure.ai.projects import AIProjectClient
+        from azure.identity import DefaultAzureCredential
+        project = AIProjectClient(
+            endpoint=FOUNDRY_ENDPOINT,
+            credential=DefaultAzureCredential(),
+        )
+        _foundry_openai = project.get_openai_client()
         print(f"  [Foundry] OpenAI client initialized for {FOUNDRY_AGENT_NAME}")
     return _foundry_openai
 
 
 async def _call_llm(messages: list[dict]) -> str:
-    """Call LLM via Foundry threads/runs, Responses API, or direct Azure OpenAI."""
+    """Call LLM via Foundry Responses API or direct Azure OpenAI."""
     if FOUNDRY_ENDPOINT:
-        try:
-            return await _call_via_foundry_threads(messages)
-        except Exception as e:
-            print(f"  [!] Foundry threads/runs failed ({e}), trying Responses API...")
         try:
             return await _call_via_foundry(messages)
         except Exception as e:
-            print(f"  [!] Foundry Responses API failed ({e}), falling back to direct Azure OpenAI")
+            print(f"  [!] Foundry call failed ({e}), falling back to direct Azure OpenAI")
     return await _call_direct(messages)
 
 
-def _foundry_api(method: str, path: str, body: dict | None = None) -> tuple[int, dict]:
-    """Make a REST call to the Foundry API via AIProjectClient.send_request()."""
-    from azure.core.rest import HttpRequest
-    client = _get_foundry_client()
-    url = f"{FOUNDRY_ENDPOINT}{path}?api-version={FOUNDRY_API_VERSION}"
-    kw = {"method": method, "url": url, "headers": {"Content-Type": "application/json"}}
-    if body is not None:
-        kw["json"] = body
-    req = HttpRequest(**kw)
-    resp = client.send_request(req)
-    return resp.status_code, json.loads(resp.text())
-
-
-async def _call_via_foundry_threads(messages: list[dict]) -> str:
-    """Call agent via Foundry threads/runs API (creates tracked runs in Operate tab)."""
-    system_parts = [m["content"] for m in messages if m["role"] == "system"]
-    user_parts = [m["content"] for m in messages if m["role"] == "user"]
-    system_prompt = "\n\n".join(system_parts) if system_parts else None
-    user_prompt = "\n\n".join(user_parts)
-
-    def _sync_call():
-        thread_id = None
-        try:
-            status, thread = _foundry_api("POST", "/threads")
-            if status != 200:
-                raise RuntimeError(f"Thread create failed ({status}): {thread}")
-            thread_id = thread["id"]
-
-            status, msg = _foundry_api("POST", f"/threads/{thread_id}/messages", {
-                "role": "user", "content": user_prompt,
-            })
-            if status != 200:
-                raise RuntimeError(f"Message create failed ({status}): {msg}")
-
-            run_body = {"assistant_id": FOUNDRY_ASSISTANT_ID}
-            if system_prompt:
-                run_body["additional_instructions"] = system_prompt
-            status, run = _foundry_api("POST", f"/threads/{thread_id}/runs", run_body)
-            if status != 200:
-                raise RuntimeError(f"Run create failed ({status}): {run}")
-
-            run_id = run["id"]
-            print(f"  [Foundry] {FOUNDRY_AGENT_NAME} run started: {run_id} (thread={thread_id})")
-
-            for i in range(90):
-                time.sleep(2)
-                status, run_check = _foundry_api("GET", f"/threads/{thread_id}/runs/{run_id}")
-                run_status = run_check.get("status", "unknown")
-                if run_status == "completed":
-                    break
-                elif run_status in ("failed", "cancelled", "expired"):
-                    raise RuntimeError(f"Run {run_status}: {run_check.get('last_error', {})}")
-            else:
-                raise RuntimeError("Run timed out after 3 minutes")
-
-            status, msgs = _foundry_api("GET", f"/threads/{thread_id}/messages")
-            if status != 200:
-                raise RuntimeError(f"Messages read failed ({status})")
-
-            for m in msgs.get("data", []):
-                if m.get("role") == "assistant":
-                    for c in m.get("content", []):
-                        if c.get("type") == "text":
-                            text = c["text"]["value"]
-                            print(f"  [Foundry] {FOUNDRY_AGENT_NAME} responded via threads/runs (run={run_id})")
-                            return text
-
-            raise RuntimeError("No assistant response found in thread messages")
-        finally:
-            if thread_id:
-                try:
-                    _foundry_api("DELETE", f"/threads/{thread_id}")
-                except Exception:
-                    pass
-
-    return await asyncio.to_thread(_sync_call)
-
-
 async def _call_via_foundry(messages: list[dict]) -> str:
-    """Call LLM through Foundry Responses API (fallback with telemetry)."""
+    """Call LLM through Foundry Responses API with telemetry + guardrails.
+
+    Uses model=MODEL_DEPLOYMENT with instructions=system_prompt so that:
+    - The call routes through the Foundry endpoint (guardrails applied)
+    - ResponsesInstrumentor generates gen_ai.* spans for App Insights / Operate tab
+    """
     system_parts = [m["content"] for m in messages if m["role"] == "system"]
     user_parts = [m["content"] for m in messages if m["role"] == "user"]
     system_prompt = "\n\n".join(system_parts) if system_parts else None
