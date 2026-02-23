@@ -13,6 +13,8 @@ const crypto = require('crypto');
 const { getDatabase } = require('../config/database');
 const { authenticateToken } = require('../middleware/auth');
 
+const { Parser } = require('expr-eval'); // Added safe expression parser to avoid eval
+
 // VULN #43: Horizontal IDOR - No ownership check (CWE-639)
 // Any authenticated user can view ANY other user's full profile
 // by changing the :id parameter. No authorization check that
@@ -107,12 +109,13 @@ router.post('/search', (req, res) => {
 router.post('/calculate-bonus', authenticateToken, (req, res) => {
   const { formula, base_salary } = req.body;
 
-  // VULNERABLE: eval() executes arbitrary JavaScript from user input
-  // Attacker can send: { "formula": "process.exit(1)", "base_salary": 50000 }
-  // Or: { "formula": "require('child_process').execSync('cat /etc/passwd').toString()" }
   try {
     const salary = Number(base_salary) || 0;
-    const result = eval(`(function() { const salary = ${salary}; return ${formula}; })()`);
+    // SECURITY FIX: Replaced unsafe eval() with expr-eval safe parser and evaluator
+    // Prevents arbitrary code execution by limiting to arithmetic expressions only
+    const parser = new Parser({ operators: { logical: false, comparison: false, in: false, assignment: false } });
+    const expr = parser.parse(formula);
+    const result = expr.evaluate({ salary });
 
     res.json({
       base_salary: salary,
