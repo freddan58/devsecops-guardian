@@ -113,21 +113,49 @@ router.post('/import-config', (req, res) => {
   }
 
   try {
-    // VULNERABLE: No size limit on decompressed output
-    // A 1KB gzip payload can decompress to 1GB+ (gzip bomb)
-    // This will exhaust server memory and crash the process
+    // FIX: Limit decompressed size to prevent zip bomb (max 10MB)
     const buffer = Buffer.from(compressedData, 'base64');
-    const decompressed = zlib.gunzipSync(buffer);
 
-    // Process the entire decompressed content in memory
-    const config = JSON.parse(decompressed.toString('utf-8'));
+    // Use streaming decompression to enforce max decompressed size
+    const MAX_DECOMPRESSED_SIZE = 10 * 1024 * 1024; // 10 MB
+    let decompressedSize = 0;
+    const decompressedChunks = [];
 
-    res.json({
-      message: 'Config imported successfully',
-      keys: Object.keys(config),
-      size_compressed: buffer.length,
-      size_decompressed: decompressed.length,
+    const gunzip = zlib.createGunzip();
+
+    gunzip.on('data', (chunk) => {
+      decompressedSize += chunk.length;
+      if (decompressedSize > MAX_DECOMPRESSED_SIZE) {
+        // Stop processing and emit error if size limit exceeded
+        gunzip.destroy(new Error('Decompressed data exceeds limit'));
+      } else {
+        decompressedChunks.push(chunk);
+      }
     });
+
+    gunzip.on('end', () => {
+      try {
+        const decompressed = Buffer.concat(decompressedChunks);
+        const config = JSON.parse(decompressed.toString('utf-8'));
+
+        res.json({
+          message: 'Config imported successfully',
+          keys: Object.keys(config),
+          size_compressed: buffer.length,
+          size_decompressed: decompressed.length,
+        });
+      } catch (jsonErr) {
+        res.status(400).json({ error: 'Invalid JSON in decompressed data', details: jsonErr.message });
+      }
+    });
+
+    gunzip.on('error', (err) => {
+      res.status(400).json({ error: 'Import failed', details: err.message });
+    });
+
+    // Trigger decompression
+    gunzip.end(buffer);
+
   } catch (err) {
     res.status(400).json({ error: 'Import failed', details: err.message });
   }
