@@ -60,16 +60,13 @@ router.post('/', authenticateToken, (req, res) => {
   }
 });
 
-// VULNERABLE: IDOR - No ownership check!
-// Any authenticated user can view ANY transfer by ID
-// Should verify: transfer.user_id === req.user.id
+// FIXED: Added ownership check to ensure transfer belongs to authenticated user to prevent IDOR
 router.get('/:id', authenticateToken, (req, res) => {
   const { id } = req.params;
 
   try {
     const db = getDatabase();
     
-    // VULNERABLE: Only checks if transfer exists, NOT if it belongs to the user
     const transfer = db.prepare(
       `SELECT t.*, a1.account_number as from_account, a2.account_number as to_account
        FROM transfers t
@@ -82,7 +79,11 @@ router.get('/:id', authenticateToken, (req, res) => {
       return res.status(404).json({ error: 'Transfer not found' });
     }
 
-    // Missing: if (transfer.user_id !== req.user.id) return 403
+    // Authorization check to verify transfer ownership
+    if (transfer.user_id !== req.user.id) {
+      return res.status(403).json({ error: 'Forbidden: You do not have access to this transfer' });
+    }
+
     res.json({ data: transfer });
   } catch (err) {
     res.status(500).json({ error: 'Query error', details: err.message });
