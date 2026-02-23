@@ -62,11 +62,9 @@ router.post('/change-password', authenticateToken, (req, res) => {
     const newHash = crypto.createHash('md5').update(new_password).digest('hex');
     db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(newHash, req.user.id);
 
-    // VULNERABLE: Returns the hash in the response
+    // FIXED: Removed password hash and algorithm from response to prevent information exposure (CWE-200)
     res.json({
-      message: 'Password updated successfully',
-      password_hash: newHash,
-      algorithm: 'md5',
+      message: 'Password updated successfully'
     });
   } catch (err) {
     res.status(500).json({ error: 'Password change failed' });
