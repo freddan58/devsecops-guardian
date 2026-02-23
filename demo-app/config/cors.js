@@ -21,7 +21,7 @@ const corsOptions = {
   },
   credentials: true,              // Sends cookies with cross-origin requests
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['*'],          // Allows any header
+  allowedHeaders: ['Content-Type', 'Authorization'],  // Fixed: Explicitly whitelist allowed headers to prevent excessive CORS headers
   exposedHeaders: ['Set-Cookie', 'Authorization', 'X-Session-Token'],
   maxAge: 86400 * 30,             // Cache preflight for 30 days
 };
