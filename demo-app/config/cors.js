@@ -13,7 +13,12 @@ const allowedOrigins = [
 
 const corsOptions = {
   origin: function (origin, callback) {
-    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+    // FIX: Reject requests with missing Origin to prevent credential leakage (CWE-942)
+    if (!origin) {
+      callback(new Error('Origin header missing - not allowed by CORS'));
+      return;
+    }
+    if (allowedOrigins.indexOf(origin) !== -1) {
       callback(null, true);
     } else {
       callback(new Error('Not allowed by CORS'));
