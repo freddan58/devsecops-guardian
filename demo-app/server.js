@@ -50,6 +50,16 @@
 //  #40 Wildcard CORS         - config/cors.js        (CWE-942)
 //  #41 Missing Sec Headers   - config/cors.js        (CWE-693)
 //  #42 Insecure TLS Config   - config/cors.js        (CWE-326)
+//  #43 Horizontal IDOR       - routes/profile.js     (CWE-639)
+//  #44 Weak Password Hash    - routes/profile.js     (CWE-916)
+//  #45 Mass Data Exposure    - routes/profile.js     (CWE-200)
+//  #46 NoSQL/SQL Injection   - routes/profile.js     (CWE-943)
+//  #47 Unsafe Eval           - routes/profile.js     (CWE-95)
+//  #48 Command Injection     - routes/diagnostics.js (CWE-78)
+//  #49 XXE Injection         - routes/diagnostics.js (CWE-611)
+//  #50 Log Forging           - routes/diagnostics.js (CWE-117)
+//  #51 Resource Exhaustion   - routes/diagnostics.js (CWE-400)
+//  #52 JWT None Algorithm    - routes/diagnostics.js (CWE-347)
 // ============================================================
 
 require('dotenv').config();
@@ -87,6 +97,8 @@ app.use('/api/payments', require('./routes/payments'));         // VULN #17-21: 
 app.use('/api/uploads', require('./routes/uploads'));           // VULN #22-26: File upload, XXE, shell injection
 app.use('/api/notifications', require('./routes/notifications')); // VULN #27-31: SSTI, ReDoS, insecure cookies
 app.use('/api/reports', require('./routes/reports'));           // VULN #32-35: SQL injection, weak crypto, creds
+app.use('/api/profile', require('./routes/profile'));           // VULN #43-47: IDOR, weak hash, eval, data exposure
+app.use('/api/diagnostics', require('./routes/diagnostics'));   // VULN #48-52: Command injection, XXE, JWT, log forge
 
 // Health check
 app.get('/health', (req, res) => {
@@ -140,6 +152,15 @@ app.get('/', (req, res) => {
       'POST /api/reports/password-reset',
       'POST /api/reports/send-report',
       'POST /api/reports/sync-external',
+      'GET  /api/profile/:id',
+      'POST /api/profile/change-password',
+      'POST /api/profile/search',
+      'POST /api/profile/calculate-bonus',
+      'GET  /api/diagnostics/ping?host=',
+      'POST /api/diagnostics/health-check',
+      'POST /api/diagnostics/audit-log',
+      'POST /api/diagnostics/import-config',
+      'POST /api/diagnostics/verify-token',
       'GET  /health'
     ]
   });
