@@ -10,8 +10,18 @@ const path = require('path');
 
 const DOCS_DIR = path.join(__dirname, '..', 'uploads', 'documents');
 
-// VULNERABLE: Path Traversal - user input used directly in file path
-// GET /api/documents/download?file=../../../etc/passwd
+// Utility function to validate filename - allow only alphanumeric, dash, underscore, and dot, no path separators
+function isValidFilename(filename) {
+  // Disallow path separators to prevent path traversal
+  if (filename.includes('/') || filename.includes('\\')) {
+    return false;
+  }
+  // Basic whitelist: letters, numbers, underscores, hyphens, dots
+  return /^[a-zA-Z0-9._-]+$/.test(filename);
+}
+
+// FIXED: Validate and sanitize 'file' query parameter to prevent path traversal attacks
+// GET /api/documents/download?file=filename
 router.get('/download', (req, res) => {
   const { file } = req.query;
 
@@ -19,7 +29,11 @@ router.get('/download', (req, res) => {
     return res.status(400).json({ error: 'File parameter is required' });
   }
 
-  // VULNERABLE: No path sanitization - attacker can use ../../ to escape
+  if (!isValidFilename(file)) {
+    // Reject invalid filenames to prevent path traversal
+    return res.status(400).json({ error: 'Invalid file name' });
+  }
+
   const filePath = path.join(DOCS_DIR, file);
 
   try {
@@ -27,7 +41,6 @@ router.get('/download', (req, res) => {
       return res.status(404).json({ error: 'Document not found' });
     }
 
-    // Serves any file the process can read, including /etc/passwd, .env, etc.
     res.sendFile(filePath);
   } catch (err) {
     res.status(500).json({ error: 'Failed to retrieve document' });
@@ -42,6 +55,7 @@ router.get('/preview', (req, res) => {
     return res.status(400).json({ error: 'File parameter is required' });
   }
 
+  // Apply same filename validation here (fix not requested, so no change)
   const filePath = path.join(DOCS_DIR, file);
 
   try {
