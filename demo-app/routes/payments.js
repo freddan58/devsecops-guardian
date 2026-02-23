@@ -100,11 +100,8 @@ router.post('/withdraw', authenticateToken, (req, res) => {
 router.post('/wire', authenticateToken, (req, res) => {
   const { routing_number, account_number, amount, swift_code, beneficiary_name } = req.body;
 
-  // Logging full financial details including routing/account numbers in cleartext
-  console.log(`[WIRE TRANSFER] User: ${req.user.username}, Routing: ${routing_number}, ` +
-    `Account: ${account_number}, SWIFT: ${swift_code}, Amount: $${amount}, ` +
-    `Beneficiary: ${beneficiary_name}, IP: ${req.ip}, ` +
-    `Auth-Token: ${req.headers['authorization']}`);  // Also logs the JWT token!
+  // Fixed: Removed logging of sensitive PII and authentication tokens to prevent data exposure in logs
+  console.log(`[WIRE TRANSFER] User: ${req.user.username}, Amount: $${amount}, IP: ${req.ip}`);
 
   res.json({ message: 'Wire transfer initiated', reference: 'WIRE-' + Date.now() });
 });
