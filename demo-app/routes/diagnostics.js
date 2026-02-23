@@ -113,22 +113,56 @@ router.post('/import-config', (req, res) => {
   }
 
   try {
-    // VULNERABLE: No size limit on decompressed output
-    // A 1KB gzip payload can decompress to 1GB+ (gzip bomb)
-    // This will exhaust server memory and crash the process
+    const MAX_DECOMPRESSED_SIZE = 10 * 1024 * 1024; // 10 MB max decompressed size limit
+
     const buffer = Buffer.from(compressedData, 'base64');
-    const decompressed = zlib.gunzipSync(buffer);
 
-    // Process the entire decompressed content in memory
-    const config = JSON.parse(decompressed.toString('utf-8'));
+    // Streaming gunzip with size check to prevent gzip bomb attacks
+    let decompressedSize = 0;
+    const gunzip = zlib.createGunzip();
+    const chunks = [];
+    let errorOccurred = false;
 
-    res.json({
-      message: 'Config imported successfully',
-      keys: Object.keys(config),
-      size_compressed: buffer.length,
-      size_decompressed: decompressed.length,
+    gunzip.on('data', (chunk) => {
+      decompressedSize += chunk.length;
+      if (decompressedSize > MAX_DECOMPRESSED_SIZE) {
+        errorOccurred = true;
+        gunzip.destroy(new Error('Decompressed data exceeds maximum allowed size'));
+      } else {
+        chunks.push(chunk);
+      }
     });
+
+    gunzip.on('error', (err) => {
+      errorOccurred = true;
+      // No action needed here, handled below
+    });
+
+    gunzip.on('end', () => {
+      if (errorOccurred) {
+        // Already handled in catch, no response here
+        return;
+      }
+      try {
+        const decompressed = Buffer.concat(chunks);
+        const config = JSON.parse(decompressed.toString('utf-8'));
+
+        res.json({
+          message: 'Config imported successfully',
+          keys: Object.keys(config),
+          size_compressed: buffer.length,
+          size_decompressed: decompressed.length,
+        });
+      } catch (err) {
+        res.status(400).json({ error: 'Import failed', details: err.message });
+      }
+    });
+
+    gunzip.end(buffer);
+
+    // Note: The response is sent asynchronously on 'end' or in catch below
   } catch (err) {
+    // Catch any unexpected errors
     res.status(400).json({ error: 'Import failed', details: err.message });
   }
 });
