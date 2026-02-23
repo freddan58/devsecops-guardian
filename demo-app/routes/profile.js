@@ -86,16 +86,24 @@ router.post('/search', (req, res) => {
   try {
     const db = getDatabase();
 
-    // VULNERABLE: Dynamically builds WHERE clause from user-controlled JSON
-    // Attacker can send: { "filter": { "role": "admin", "1=1 OR username": "anything" } }
-    const conditions = Object.entries(filter)
-      .map(([key, value]) => `${key} = '${value}'`)  // SQL injection via key AND value
-      .join(' AND ');
+    // FIX: Validate keys against a whitelist and use parameterized queries to prevent SQL injection
+    const allowedKeys = new Set(['id', 'username', 'email', 'role']);
+    const conditions = [];
+    const values = [];
 
-    const query = `SELECT id, username, email, role FROM users WHERE ${conditions}`;
-    const users = db.prepare(query).all();
+    for (const [key, value] of Object.entries(filter)) {
+      if (!allowedKeys.has(key)) {
+        return res.status(400).json({ error: `Invalid filter key: ${key}` });
+      }
+      conditions.push(`${key} = ?`);
+      values.push(value);
+    }
 
-    res.json({ results: users, query_used: query });  // Also leaks the query
+    const whereClause = conditions.length > 0 ? conditions.join(' AND ') : '1=1';
+    const query = `SELECT id, username, email, role FROM users WHERE ${whereClause}`;
+    const users = db.prepare(query).all(...values);
+
+    res.json({ results: users });  // Removed query leak to prevent info disclosure
   } catch (err) {
     res.status(500).json({ error: 'Search failed', details: err.message });
   }
