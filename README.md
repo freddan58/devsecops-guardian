@@ -1,23 +1,22 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Microsoft%20AI%20Dev%20Days-2026-blue?style=for-the-badge&logo=microsoft" alt="Microsoft AI Dev Days 2026"/>
   <img src="https://img.shields.io/badge/Track-Agentic%20DevOps-purple?style=for-the-badge" alt="Agentic DevOps"/>
-  <img src="https://img.shields.io/badge/Azure%20OpenAI-Foundry-orange?style=for-the-badge&logo=microsoftazure" alt="Azure OpenAI"/>
-  <img src="https://img.shields.io/badge/Agent%20Framework-Orchestration-green?style=for-the-badge" alt="Agent Framework"/>
+  <img src="https://img.shields.io/badge/Azure%20AI%20Foundry-Agents-orange?style=for-the-badge&logo=microsoftazure" alt="Azure AI Foundry"/>
+  <img src="https://img.shields.io/badge/Guardrails-DevSecOps--Guardian--Safety-red?style=for-the-badge" alt="RAI Guardrails"/>
 </p>
 
 # DevSecOps Guardian
 
 **Enterprise-grade multi-agent AI security platform for banking and regulated industries.**
 
-Five specialized AI agents replace traditional SAST tools (SonarQube, Checkmarx, Fortify) with LLM-powered reasoning — from vulnerability detection through auto-fix PRs to PCI-DSS 4.0 compliance reports, fully automated.
+Five specialized AI agents — **registered and running in Azure AI Foundry** — replace traditional SAST tools (SonarQube, Checkmarx, Fortify) with LLM-powered reasoning. From vulnerability detection through auto-fix PRs to PCI-DSS 4.0 compliance reports, fully automated with **AI safety guardrails** applied to every agent interaction.
 
 <p align="center">
   <a href="https://ca-dashboard.agreeablesand-6566841b.eastus.azurecontainerapps.io">Live Demo</a> &bull;
   <a href="#hero-technologies">Hero Technologies</a> &bull;
-  <a href="#architecture">Architecture</a> &bull;
-  <a href="#agents">Agents</a> &bull;
-  <a href="#quick-start">Quick Start</a> &bull;
-  <a href="#demo-video">Demo Video</a>
+  <a href="#how-it-works---foundry-agent-pipeline">How It Works</a> &bull;
+  <a href="#agents-in-foundry">Agents</a> &bull;
+  <a href="#quick-start">Quick Start</a>
 </p>
 
 ---
@@ -30,132 +29,175 @@ Banks and financial institutions face a critical gap in application security:
 - **No contextual reasoning** — tools flag `bcrypt` hashing as "weak crypto" without understanding it's the right choice
 - **No compliance automation** — security teams manually map CWEs to PCI-DSS controls for every audit
 - **No integrated fix generation** — developers receive findings but must research and implement fixes themselves
-- **Fragmented toolchain** — separate tools for scanning, analysis, fixing, and compliance with no pipeline
+- **No AI safety** — LLM-based tools have no guardrails against prompt injection or harmful content generation
 
 ## The Solution
 
-DevSecOps Guardian is a **multi-agent AI pipeline** where each agent specializes in one security task, passing structured outputs to the next:
+DevSecOps Guardian is a **multi-agent AI pipeline** where each agent is **registered in Azure AI Foundry** with safety guardrails, and invoked via the **Responses API**. Every agent interaction is tracked with telemetry in **Application Insights**:
 
 ```
-Code Push --> Scanner --> Analyzer --> Fixer --> Risk Profiler --> Compliance
-               |            |           |            |               |
-               |            |           |            |               +-- PCI-DSS 4.0 audit report
-               |            |           |            +-- OWASP Top 10 risk score
-               |            |           +-- Draft PRs with security fixes
-               |            +-- False positive elimination (exploitability 0-100)
-               +-- AI-detected vulnerabilities (CWE-classified)
+Code Push --> SecurityScanner --> VulnerabilityAnalyzer --> SecurityFixer --> RiskProfiler --> ComplianceReporter
+                  |                      |                      |                |                  |
+                  |                      |                      |                |                  +-- PCI-DSS 4.0 report
+                  |                      |                      |                +-- OWASP Top 10 risk score
+                  |                      |                      +-- Draft PRs with fixes
+                  |                      +-- False positive elimination (0-100)
+                  +-- AI-detected vulnerabilities (CWE-classified)
+
+              All calls route through Azure AI Foundry Responses API
+              DevSecOps-Guardian-Safety guardrails applied to every interaction
+              gen_ai.* telemetry captured in Application Insights
 ```
 
 ---
 
 ## Hero Technologies
 
-| Technology | How We Use It | Implementation |
-|-----------|---------------|----------------|
-| **Microsoft Foundry Agent Service** | All 5 agents registered via Responses API (`azure-ai-projects` v2 SDK) — visible in main Agents section | `agents/foundry_client.py`, `agents/register_all_agents.py` |
-| **Microsoft Agent Framework** | Sequential multi-agent orchestration pipeline with `Agent` + `WorkflowBuilder` from `agent-framework` SDK | `agents/orchestrator.py` |
-| **Azure MCP Server** | Custom GitHub MCP Server (9 tools) registered as native `MCPTool` in Foundry for agent-tool integration | `mcp-servers/github/server.py`, `mcp-servers/github/foundry_adapter.py` |
-| **GitHub Copilot Agent Mode** | Remediation Accelerator: auto-creates GitHub Issues for Copilot Coding Agent + custom instructions | `agents/fixer/issue_creator.py`, `.github/copilot-instructions.md` |
+### 1. Microsoft Foundry Agent Service (Primary)
+
+All 5 security agents are **registered in Azure AI Foundry** as `prompt`-kind agents using the `azure-ai-projects` v2 SDK. In production, **every LLM call routes through Foundry's Responses API** — not direct Azure OpenAI. This means:
+
+- **Guardrails are enforced** on every agent interaction (`DevSecOps-Guardian-Safety` RAI policy)
+- **Telemetry is captured** automatically via `ResponsesInstrumentor` (gen_ai.* OpenTelemetry spans)
+- **Agents are visible** in the Foundry portal's Agents section with full interaction history
+- **Evaluations apply** to production traffic for quality monitoring
+
+```python
+# Production call path (agents/*/llm_engine.py)
+from azure.ai.projects import AIProjectClient
+from azure.identity import DefaultAzureCredential
+
+project = AIProjectClient(endpoint=FOUNDRY_ENDPOINT, credential=DefaultAzureCredential())
+openai_client = project.get_openai_client()
+
+# Routes through Foundry → guardrails applied → telemetry captured
+response = openai_client.responses.create(
+    model="gpt-4.1-mini",
+    instructions=system_prompt,        # Agent-specific security expertise
+    input=[{"role": "user", "content": user_prompt}],
+    text={"format": {"type": "json_object"}},
+)
+```
+
+| Implementation | File |
+|----------------|------|
+| Agent registration | `agents/register_all_agents.py` |
+| Scanner LLM engine | `agents/scanner/llm_engine.py` |
+| Analyzer LLM engine | `agents/analyzer/llm_engine.py` |
+| Fixer LLM engine | `agents/fixer/llm_engine.py` |
+| Risk Profiler LLM engine | `agents/risk-profiler/llm_engine.py` |
+| Compliance LLM engine | `agents/compliance/llm_engine.py` |
+
+### 2. OpenTelemetry + Application Insights (Observability)
+
+Every agent has built-in tracing that captures **gen_ai.* spans** for full observability:
+
+```python
+# Automatic telemetry setup in each agent (agents/*/llm_engine.py)
+from opentelemetry.instrumentation.openai import ResponsesInstrumentor
+from azure.monitor.opentelemetry.exporter import AzureMonitorTraceExporter
+
+# Patches openai.responses.create() to emit gen_ai.* spans
+ResponsesInstrumentor().instrument(enable_content_recording=True)
+
+# Spans exported to Application Insights → visible in Foundry Operate tab
+provider.add_span_processor(SimpleSpanProcessor(AzureMonitorTraceExporter(...)))
+```
+
+This provides:
+- **Foundry Operate tab**: See every agent interaction with latency, tokens, and content
+- **Application Insights**: Query gen_ai spans, set alerts, track cost
+- **End-to-end tracing**: Full pipeline visibility from scan trigger to compliance report
+
+### 3. Azure MCP Server (Tool Integration)
+
+Custom GitHub MCP Server with **9 tools** built with **FastMCP**, registered as native `MCPTool` in Foundry:
+
+| Tool Category | Tools | Used By |
+|---------------|-------|---------|
+| **Read** | `github_read_file`, `github_list_files`, `github_read_pr_diff`, `github_list_pr_files`, `github_get_pr` | Scanner, Analyzer |
+| **Write** | `github_create_branch`, `github_create_or_update_file`, `github_create_pr`, `github_post_pr_comment` | Fixer |
+
+### 4. GitHub Copilot Agent Mode (Remediation)
+
+When the Fixer agent creates PRs, it also creates **formatted GitHub Issues** that GitHub Copilot Coding Agent picks up for enhanced remediation:
+
+```
+Fixer Agent → Draft PR + GitHub Issue → Copilot Coding Agent → Enhanced Fix → Human Review → Merge
+```
 
 ---
 
-## Microsoft Foundry Integration
+## How It Works — Foundry Agent Pipeline
 
-All 5 agents are registered in Microsoft Foundry Agent Service using the **Responses API** (`azure-ai-projects` v2 SDK, `PromptAgentDefinition`). Agents appear in the main **Agents** section of the Azure AI Foundry portal (not Classic Agents):
+```
+  User clicks "Scan" in Dashboard
+         |
+         v
+  +------------------+
+  | API Gateway      |  FastAPI on Azure Container Apps
+  | POST /api/scans  |
+  +--------+---------+
+           |
+           | Orchestrates 5 stages sequentially
+           |
+  +--------v---------+     Foundry Responses API
+  | SecurityScanner  | --> openai_client.responses.create(model="gpt-4.1-mini", ...)
+  | (llm_engine.py)  |     + DevSecOps-Guardian-Safety guardrails
+  +--------+---------+     + ResponsesInstrumentor → App Insights
+           | scanner-output.json (CWE findings)
+           |
+  +--------v-----------------+
+  | VulnerabilityAnalyzer    | --> Same Foundry Responses API path
+  | Reads findings + source  |     Contextual false positive elimination
+  +--------+-----------------+
+           | analyzer-output.json (CONFIRMED / FALSE_POSITIVE verdicts)
+           |
+  +--------v---------+
+  | SecurityFixer    | --> Foundry Responses API + GitHub API
+  | Generates fixes  |     Creates branches, commits, draft PRs
+  +--------+---------+
+           | fixer-output.json (fix status per finding)
+           |
+  +--------v---------+
+  | RiskProfiler     | --> Foundry Responses API
+  | OWASP Top 10     |     Holistic risk assessment
+  +--------+---------+
+           | risk-profile-output.json
+           |
+  +--------v-----------------+
+  | ComplianceReporter       | --> Foundry Responses API
+  | PCI-DSS 4.0 mapping     |     Audit-ready compliance report
+  +--------+-----------------+
+           | compliance-output.json
+           |
+           v
+  Dashboard displays results with full evidence trail
+```
 
-| Agent | Kind | Model | Description |
-|-------|------|-------|-------------|
-| **SecurityScanner** | `prompt` | `gpt-4.1-mini` | LLM-based code vulnerability detection |
-| **VulnerabilityAnalyzer** | `prompt` | `gpt-4.1-mini` | Contextual false positive elimination |
-| **SecurityFixer** | `prompt` | `gpt-4.1-mini` | Automated remediation + native MCP tools |
-| **RiskProfiler** | `prompt` | `gpt-4.1-mini` | OWASP Top 10 risk assessment |
-| **ComplianceReporter** | `prompt` | `gpt-4.1-mini` | PCI-DSS 4.0 audit report generation |
+**Key point**: Every LLM call in production goes through `project.get_openai_client().responses.create()`, which routes through the **Foundry endpoint**. The agents registered in Foundry (SecurityScanner:2, VulnerabilityAnalyzer:2, etc.) have the `DevSecOps-Guardian-Safety` RAI policy applied, ensuring guardrails are enforced on all agent interactions. The `ResponsesInstrumentor` captures gen_ai.* spans that appear in both Application Insights and the Foundry Operate tab.
+
+---
+
+## Agents in Foundry
+
+All 5 agents are registered in Azure AI Foundry under the project `devsecops-guardian-hackaton-etech`:
+
+| Agent | Kind | Model | Guardrails | Purpose |
+|-------|------|-------|------------|---------|
+| **SecurityScanner:2** | `prompt` | `gpt-4.1-mini` | DevSecOps-Guardian-Safety | LLM-based code vulnerability detection |
+| **VulnerabilityAnalyzer:2** | `prompt` | `gpt-4.1-mini` | DevSecOps-Guardian-Safety | Contextual false positive elimination |
+| **SecurityFixer:2** | `prompt` | `gpt-4.1-mini` | DevSecOps-Guardian-Safety | Automated code fix generation |
+| **RiskProfiler:2** | `prompt` | `gpt-4.1-mini` | DevSecOps-Guardian-Safety | OWASP Top 10 risk assessment |
+| **ComplianceReporter:2** | `prompt` | `gpt-4.1-mini` | DevSecOps-Guardian-Safety | PCI-DSS 4.0 compliance auditing |
 
 **Foundry Endpoint**: `https://devsecops-guardian-hackaton-etec.services.ai.azure.com`
 
-```python
-# agents/foundry_client.py — Responses API (v2)
-from azure.ai.projects import AIProjectClient
-from azure.ai.projects.models import PromptAgentDefinition
-from azure.identity import DefaultAzureCredential
-
-client = AIProjectClient(endpoint=FOUNDRY_ENDPOINT, credential=DefaultAzureCredential())
-agent = client.agents.create(
-    name="SecurityScanner",
-    definition=PromptAgentDefinition(model="gpt-4.1-mini", instructions="..."),
-)
-
-# Execute via Responses API
-openai_client = client.get_openai_client()
-response = openai_client.responses.create(...)
-```
-
----
-
-## Microsoft Agent Framework
-
-Pipeline orchestration uses the **Microsoft Agent Framework** (`agent-framework` SDK) with `AzureAIClient` and `WorkflowBuilder`:
-
-- **5 Agent instances**: Each connects to a Foundry-registered agent via `AzureAIClient` (Responses API)
-- **Sequential workflow chain**: Scanner --> Analyzer --> Fixer --> Risk Profiler --> Compliance
-- **State management**: Findings state passed between agents with full context
-- **Native MCP tool integration**: SecurityFixer agent has GitHub MCP tools registered as native `MCPTool`
-- **Human-in-the-loop**: Fixer creates Draft PRs requiring human approval before merge
-
-```python
-# agents/orchestrator.py — Microsoft Agent Framework
-from agent_framework import Agent, WorkflowBuilder
-from agent_framework_azure_ai import AzureAIClient
-
-client = AzureAIClient(project_endpoint=FOUNDRY_ENDPOINT, agent_name="SecurityScanner", ...)
-scanner = Agent(client=client, name="SecurityScanner")
-
-workflow = WorkflowBuilder(start_executor=scanner, output_executors=[compliance])
-workflow.add_chain([scanner, analyzer, fixer, profiler, compliance])
-result = await workflow.build().run(message="Scan for vulnerabilities")
-```
-
----
-
-## Azure MCP Integration
-
-Custom GitHub MCP Server with **9 tools** registered in Foundry Agent Service as a **native `MCPTool`** (Responses API):
-
-**Read Tools** (used by Scanner + Analyzer):
-- `github_read_file` — Read source code files from repositories
-- `github_list_files` — Discover files to scan in repository directories
-- `github_read_pr_diff` — Read PR diffs for security analysis
-- `github_list_pr_files` — List files changed in Pull Requests
-- `github_get_pr` — Get PR details for evidence trails
-
-**Write Tools** (used by Fixer):
-- `github_create_branch` — Create security fix branches
-- `github_create_or_update_file` — Commit code fixes
-- `github_create_pr` — Create draft Pull Requests with fixes
-- `github_post_pr_comment` — Add vulnerability details to PRs
-
-The MCP Server is built with **FastMCP** and exposed via HTTP adapter for Foundry integration.
-
----
-
-## GitHub Copilot Agent Mode Integration
-
-DevSecOps Guardian integrates with GitHub Copilot in two ways:
-
-### 1. Development with Copilot Agent Mode
-This project was developed using GitHub Copilot Agent Mode in VS Code, which autonomously planned, wrote, tested, and refined code across the entire codebase. Custom instructions in `.github/copilot-instructions.md` guided Copilot's security-aware coding.
-
-### 2. Remediation Accelerator
-When the Analyzer Agent confirms vulnerabilities, the system automatically:
-1. Creates formatted GitHub Issues with full vulnerability context
-2. Labels issues with `security`, severity level, and `copilot-fix`
-3. Copilot Coding Agent picks up issues and generates enhanced fix Pull Requests
-4. Human developers review and merge — maintaining human-in-the-loop compliance
-
-This creates a powerful **Agentic DevOps loop**:
-```
-Scanner --> Analyzer --> Fixer (fix code) --> Issue Creator --> Copilot Agent --> PR --> Human Review --> Merge
-```
+Each agent has:
+- **Expert system prompt** — Domain-specific security expertise (AppSec engineer, compliance auditor, etc.)
+- **JSON-structured output** — Machine-parseable results for pipeline chaining
+- **RAI guardrails** — `DevSecOps-Guardian-Safety` policy prevents prompt injection and harmful content
+- **Telemetry** — All interactions visible in Foundry Operate tab via ResponsesInstrumentor
 
 ---
 
@@ -186,56 +228,28 @@ Scanner --> Analyzer --> Fixer (fix code) --> Issue Creator --> Copilot Agent --
              +--------------+------+-------+-------------+
                                    |
                     +--------------v--------------+
-                    | Microsoft Foundry Agent Svc  |
-                    | (azure-ai-projects SDK)      |
+                    |   Azure AI Foundry           |
+                    |   Responses API (v2 SDK)     |
+                    |   DevSecOps-Guardian-Safety   |  <-- RAI Guardrails
                     +-----+--------------+--------+
                           |              |
               +-----------v---+  +-------v-----------+
-              | Azure OpenAI  |  | GitHub MCP Server  |
-              | gpt-4.1-mini  |  | (9 tools, FastMCP) |
+              | Azure OpenAI  |  |  App Insights      |
+              | gpt-4.1-mini  |  |  gen_ai.* spans    |
               +---------------+  +-------------------+
 ```
 
-### Azure Services Used
+### Azure Services
 
 | Service | Purpose |
 |---------|---------|
-| **Azure AI Foundry** | Agent registration, management, and LLM inference |
-| **Azure OpenAI** | gpt-4.1-mini for all 5 agents |
-| **Azure Container Apps** | Serverless hosting for API + Dashboard (scale-to-zero) |
-| **Azure Container Registry** | Docker image storage and cloud builds |
-| **Azure DevOps Pipelines** | CI/CD with 8-stage pipeline (agents + build + deploy) |
-| **Azure Table Storage** | Persistent scan data storage |
-| **Log Analytics Workspace** | Container monitoring and diagnostics |
-
----
-
-## Agents
-
-### Agent 1: SecurityScanner
-Reads source code from GitHub via MCP tools and performs LLM-based security analysis. Unlike regex scanners, it understands code semantics — detecting business logic flaws, not just pattern matches.
-
-**Output**: List of findings with CWE classification, severity, affected file/line, and evidence.
-
-### Agent 2: VulnerabilityAnalyzer
-Takes Scanner findings plus full source code context to determine exploitability. Eliminates false positives with contextual reasoning — understands that `bcrypt` is secure hashing, parameterized queries prevent SQLi, etc.
-
-**Output**: Confirmed/false-positive verdict per finding with exploitability score (0-100).
-
-### Agent 3: SecurityFixer
-For each confirmed vulnerability: reads the vulnerable code, generates an LLM-powered fix, creates a feature branch, commits the fix, and opens a draft PR on GitHub. Also creates GitHub Issues for Copilot Coding Agent. Human-in-the-loop by design.
-
-**Output**: Draft pull requests with security fixes + GitHub Issues for Copilot.
-
-### Agent 4: RiskProfiler
-Aggregates all pipeline outputs to generate a risk profile per service/API. Maps findings to OWASP Top 10 categories, calculates attack surface exposure, and produces an overall risk score (0-100).
-
-**Output**: OWASP Top 10 breakdown, risk score, attack surface analysis.
-
-### Agent 5: ComplianceReporter
-Maps confirmed vulnerabilities to PCI-DSS 4.0 controls using CWE-to-requirement mapping. Generates audit-ready reports with evidence chains linking each finding to specific compliance requirements.
-
-**Output**: PCI-DSS 4.0 compliance report (JSON + Markdown) with control gap analysis.
+| **Azure AI Foundry** | Agent registration, Responses API routing, guardrails enforcement, Operate tab monitoring |
+| **Azure OpenAI** | gpt-4.1-mini inference for all 5 agents (via Foundry) |
+| **Application Insights** | gen_ai.* telemetry from ResponsesInstrumentor, pipeline monitoring |
+| **Azure Container Apps** | Serverless hosting for API Gateway + Dashboard |
+| **Azure Container Registry** | Docker image builds and storage |
+| **Azure Table Storage** | Persistent scan records and stage outputs |
+| **Azure DevOps Pipelines** | CI/CD with 8-stage pipeline |
 
 ---
 
@@ -243,13 +257,55 @@ Maps confirmed vulnerabilities to PCI-DSS 4.0 controls using CWE-to-requirement 
 
 | Metric | Value |
 |--------|-------|
-| **Vulnerabilities planted** | 12 (10 real + 2 false positives) |
-| **Detected by Scanner** | 12/12 (100% detection rate) |
-| **False positives identified** | 2/2 correctly eliminated by Analyzer |
-| **Noise reduction** | 25% through contextual analysis |
-| **Fix PRs generated** | Automated draft PRs for confirmed findings |
+| **Vulnerabilities planted** | 52 across 14 route files (50 real + 2 false positives) |
+| **CWE categories covered** | 30+ distinct CWE types |
+| **Detection rate** | 95%+ of planted vulnerabilities detected |
+| **False positive elimination** | Analyzer correctly identifies safe patterns (parameterized SQL, bcrypt) |
+| **Auto-fix PRs generated** | 25+ draft PRs merged with security fixes |
 | **Compliance report** | PCI-DSS 4.0 audit-ready in seconds (vs. 2-3 weeks manual) |
-| **Full evidence trail** | Detection --> Analysis --> Fix PR --> Merge --> Verification |
+| **Risk profiling** | OWASP Top 10 scoring with per-category breakdown |
+| **Guardrails** | DevSecOps-Guardian-Safety applied to 100% of agent interactions |
+| **Telemetry** | Full gen_ai.* spans in App Insights for every scan |
+
+---
+
+## Demo App — 52 Vulnerabilities
+
+A vulnerable Node.js/Express banking API (`demo-app/`) with **52 intentionally planted vulnerabilities** across 14 route files:
+
+### Original Attack Surface (Vulns #1-42)
+
+| File | Vulnerabilities | CWEs |
+|------|----------------|------|
+| `accounts.js` | SQL Injection (FIXED) | CWE-89 |
+| `search.js` | Reflected XSS | CWE-79 |
+| `users.js` | Missing Auth on DELETE | CWE-862 |
+| `transfers.js` | IDOR | CWE-639 |
+| `balance.js` | Parameterized SQL (FALSE POSITIVE) | CWE-89 |
+| `documents.js` | Path Traversal / LFI | CWE-22 |
+| `webhooks.js` | SSRF | CWE-918 |
+| `settings.js` | Prototype Pollution | CWE-1321 |
+| `export.js` | RCE via Deserialization | CWE-502 |
+| `admin.js` | Mass Assignment, Debug Endpoint, Privilege Escalation, Bulk Export | CWE-915, 489, 269, 770 |
+| `payments.js` | Race Condition, Insecure Randomness, No Validation, Cleartext Logging | CWE-367, 330, 20, 312 |
+| `uploads.js` | Unrestricted Upload, MIME Confusion, XXE, Open Redirect, Shell Injection | CWE-434, 436, 611, 601, 78 |
+| `notifications.js` | Template Injection, ReDoS, Insecure Cookies, Stack Trace Leak, Header Injection | CWE-1336, 1333, 614, 209, 113 |
+| `reports.js` | 2nd-Order SQLi, Weak Crypto MD5, Hardcoded Creds, Insecure HTTP | CWE-89, 328, 798, 319 |
+
+### New Attack Surface (Vulns #43-52)
+
+| # | Vulnerability | File | CWE |
+|---|--------------|------|-----|
+| 43 | Horizontal IDOR — access any user's profile | `profile.js` | CWE-639 |
+| 44 | Weak Password Hashing — MD5 without salt | `profile.js` | CWE-916 |
+| 45 | Mass Data Exposure — SSN, salary, bank account returned | `profile.js` | CWE-200 |
+| 46 | SQL Injection via dynamic JSON filter | `profile.js` | CWE-943 |
+| 47 | Remote Code Execution via `eval()` | `profile.js` | CWE-95 |
+| 48 | Command Injection via `execSync("ping " + host)` | `diagnostics.js` | CWE-78 |
+| 49 | XML External Entity (XXE) Injection | `diagnostics.js` | CWE-611 |
+| 50 | Log Forging / Log Injection | `diagnostics.js` | CWE-117 |
+| 51 | Gzip Bomb — Uncontrolled Resource Consumption | `diagnostics.js` | CWE-400 |
+| 52 | JWT None Algorithm + Hardcoded Secret | `diagnostics.js` | CWE-347 |
 
 ---
 
@@ -257,11 +313,11 @@ Maps confirmed vulnerabilities to PCI-DSS 4.0 controls using CWE-to-requirement 
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/api/health` | Health check + agent availability status |
-| `POST` | `/api/scans` | Trigger new security scan (async, returns 202) |
+| `GET` | `/api/health` | Health check + agent availability |
+| `POST` | `/api/scans` | Trigger new security scan |
 | `GET` | `/api/scans` | List all scans with status |
 | `GET` | `/api/scans/{id}` | Full scan detail with all agent outputs |
-| `GET` | `/api/scans/{id}/findings` | Merged findings (analyzer verdicts + fixer status) |
+| `GET` | `/api/scans/{id}/findings` | Merged findings with verdicts + fix status |
 | `GET` | `/api/scans/{id}/compliance` | PCI-DSS 4.0 compliance assessment |
 | `GET` | `/api/scans/{id}/risk-profile` | OWASP Top 10 risk profile |
 | `GET` | `/api/scans/{id}/practices` | Best practices analysis |
@@ -280,18 +336,15 @@ Maps confirmed vulnerabilities to PCI-DSS 4.0 controls using CWE-to-requirement 
 ### Option 1: Docker Compose (Recommended)
 
 ```bash
-# Clone the repository
 git clone https://github.com/freddan58/devsecops-guardian.git
 cd devsecops-guardian
 
-# Set environment variables
 export AZURE_OPENAI_ENDPOINT="your-endpoint"
 export AZURE_OPENAI_API_KEY="your-key"
 export GITHUB_TOKEN="your-github-pat"
+export FOUNDRY_ENDPOINT="your-foundry-endpoint"
 
-# Start all services
 docker compose up --build
-
 # Dashboard: http://localhost:3000
 # API:       http://localhost:8000/api/health
 ```
@@ -299,72 +352,23 @@ docker compose up --build
 ### Option 2: Local Development
 
 ```bash
-# 1. Start the API Gateway
-cd api
-pip install -r requirements.txt
-cp .env.example .env  # Fill in your credentials
+# API Gateway
+cd api && pip install -r requirements.txt
+cp .env.example .env  # Fill in credentials
 uvicorn main:app --reload --port 8000
 
-# 2. Start the Dashboard (separate terminal)
-cd dashboard
-npm install
+# Dashboard (separate terminal)
+cd dashboard && npm install
 echo "NEXT_PUBLIC_API_URL=http://localhost:8000" > .env.local
 npm run dev
-
-# Dashboard: http://localhost:3000
 ```
 
 ### Register Agents in Foundry
 
 ```bash
-# Install SDK
-pip install "azure-ai-projects>=2.0.0b3" azure-identity "agent-framework[azure-ai]"
-
-# Register all 5 agents
-cd agents
-python register_all_agents.py
+pip install "azure-ai-projects>=2.0.0b3" azure-identity
+cd agents && python register_all_agents.py
 ```
-
----
-
-## Demo App
-
-A vulnerable Node.js/Express banking API is included for testing (`demo-app/`). It contains **12 intentionally planted vulnerabilities** (10 real + 2 false positives):
-
-| # | Vulnerability | CWE | Expected Verdict |
-|---|--------------|-----|------------------|
-| 1 | SQL Injection in account lookup (FIXED) | CWE-89 | CONFIRMED |
-| 2 | Reflected XSS in search | CWE-79 | CONFIRMED |
-| 3 | Hardcoded API key in config | CWE-798 | CONFIRMED |
-| 4 | Missing auth on user deletion | CWE-862 | CONFIRMED |
-| 5 | IDOR in transfer endpoint | CWE-639 | CONFIRMED |
-| 6 | SQL query (parameterized) | CWE-89 | FALSE POSITIVE |
-| 7 | Bcrypt hashing (secure) | CWE-328 | FALSE POSITIVE |
-| 8 | PII in server logs | CWE-532 | CONFIRMED |
-| 9 | Path Traversal / LFI | CWE-22 | CONFIRMED |
-| 10 | SSRF in webhooks | CWE-918 | CONFIRMED |
-| 11 | Prototype Pollution | CWE-1321 | CONFIRMED |
-| 12 | RCE via eval/exec | CWE-502 | CONFIRMED |
-
-The Analyzer agent correctly identifies items 6 and 7 as false positives through contextual reasoning.
-
----
-
-## CI/CD Pipeline (Azure DevOps)
-
-The pipeline (`azure-pipelines.yml`) has **8 stages** split into two tracks:
-
-**Security Scan Track** (triggers on `demo-app/` changes):
-1. **Setup** -- Install Python dependencies
-2. **Scanner** -- AI-powered code security scan
-3. **Analyzer** -- False positive elimination
-4. **Fixer** -- Auto-generate security fix PRs
-5. **Risk Profiler** -- OWASP Top 10 risk assessment
-6. **Compliance** -- PCI-DSS 4.0 audit report
-
-**CI/CD Deploy Track** (triggers on `api/`, `dashboard/`, `agents/` changes):
-7. **Build** -- Docker build + push to Azure Container Registry
-8. **Deploy** -- Update Azure Container Apps
 
 ---
 
@@ -377,8 +381,9 @@ The pipeline (`azure-pipelines.yml`) has **8 stages** split into two tracks:
 | Auto-fix | Limited languages | Version bumps | **Full code rewrites as draft PRs** |
 | Risk profiling | No | No | **OWASP Top 10 risk score per service** |
 | Compliance reporting | No | No | **PCI-DSS 4.0 audit-ready reports** |
-| Multi-agent orchestration | Single tool | Single bot | **5 agents via Foundry + Agent Framework** |
-| Business logic understanding | Pattern matching | None | **LLM understands domain context** |
+| Agent orchestration | Single tool | Single bot | **5 Foundry agents with guardrails** |
+| AI safety | N/A | N/A | **DevSecOps-Guardian-Safety RAI policy** |
+| Observability | Build logs | Alerts | **gen_ai.* spans in App Insights + Foundry Operate** |
 | Copilot integration | N/A | N/A | **Auto-creates Issues for Copilot Agent** |
 
 ---
@@ -388,27 +393,28 @@ The pipeline (`azure-pipelines.yml`) has **8 stages** split into two tracks:
 ```
 devsecops-guardian/
 |-- agents/
-|   |-- scanner/              # Agent 1: LLM-based code scanner
+|   |-- scanner/              # Agent 1: LLM security scanner
+|   |   +-- llm_engine.py     # Foundry Responses API + telemetry
 |   |-- analyzer/             # Agent 2: False positive eliminator
+|   |   +-- llm_engine.py     # Foundry Responses API + telemetry
 |   |-- fixer/                # Agent 3: Auto-fix PR generator
-|   |   +-- issue_creator.py  # Copilot Coding Agent issue creator
+|   |   |-- llm_engine.py     # Foundry Responses API + telemetry
+|   |   +-- issue_creator.py  # GitHub Issues for Copilot Agent
 |   |-- risk-profiler/        # Agent 4: OWASP risk profiler
+|   |   +-- llm_engine.py     # Foundry Responses API + telemetry
 |   |-- compliance/           # Agent 5: PCI-DSS compliance auditor
-|   |-- foundry_client.py     # Foundry Agent Service SDK wrapper
-|   |-- register_all_agents.py # Register agents in Foundry
-|   +-- orchestrator.py       # Agent Framework orchestration pipeline
-|-- api/                      # FastAPI backend (gateway + pipeline runner)
+|   |   +-- llm_engine.py     # Foundry Responses API + telemetry
+|   |-- register_all_agents.py # Register all 5 agents in Foundry
+|   +-- orchestrator.py       # Agent Framework orchestration
+|-- api/                      # FastAPI backend (pipeline orchestrator)
 |-- dashboard/                # Next.js frontend (React, TypeScript, Tailwind)
-|-- demo-app/                 # Vulnerable banking API (12 planted vulns)
+|-- demo-app/                 # Vulnerable banking API (52 planted vulns)
 |-- mcp-servers/
 |   +-- github/               # GitHub MCP Server (9 tools, FastMCP)
-|       +-- foundry_adapter.py # HTTP adapter for Foundry integration
 |-- .github/
-|   +-- copilot-instructions.md # Custom instructions for Copilot Agent
-|-- infra/                    # Azure deployment scripts
+|   +-- copilot-instructions.md
 |-- azure-pipelines.yml       # 8-stage CI/CD pipeline
-|-- docker-compose.yml        # Local development setup
-+-- run_pipeline.py           # Standalone pipeline orchestrator
++-- docker-compose.yml
 ```
 
 ---
@@ -417,11 +423,12 @@ devsecops-guardian/
 
 | Layer | Technology |
 |-------|-----------|
-| **Agent Service** | Microsoft Foundry Agent Service (`azure-ai-projects` v2, Responses API) |
-| **Agent Framework** | Microsoft Agent Framework (`Agent`, `WorkflowBuilder`, `AzureAIClient`) |
-| **LLM** | Azure OpenAI (gpt-4.1-mini) via Foundry |
-| **MCP** | Custom GitHub MCP Server (FastMCP, 9 tools, registered in Foundry) |
-| **Copilot** | GitHub Copilot Agent Mode (issue creator + custom instructions) |
+| **Agent Service** | Azure AI Foundry (`azure-ai-projects` v2 SDK, Responses API, `prompt` agents) |
+| **AI Safety** | DevSecOps-Guardian-Safety RAI policy (guardrails on every agent call) |
+| **Observability** | ResponsesInstrumentor + AzureMonitorTraceExporter (gen_ai.* spans) |
+| **LLM** | Azure OpenAI `gpt-4.1-mini` (routed via Foundry) |
+| **MCP** | Custom GitHub MCP Server (FastMCP, 9 tools) |
+| **Copilot** | GitHub Copilot Agent Mode + Issue Creator |
 | **API** | FastAPI, uvicorn, Pydantic |
 | **Dashboard** | Next.js 16, React, TypeScript, Tailwind CSS, Recharts |
 | **Infrastructure** | Azure Container Apps, Azure Container Registry, Azure Table Storage |
@@ -437,15 +444,9 @@ devsecops-guardian/
 
 ---
 
-## Demo Video
-
-*Coming soon*
-
----
-
 ## Team
 
-**Soluciones Etech Corp** -- Freddy Urbano (furbano@soluetech.com)
+**Soluciones Etech Corp** — Freddy Urbano (furbano@soluetech.com)
 
 ---
 
@@ -456,5 +457,5 @@ MIT
 ---
 
 <p align="center">
-  Built for <strong>Microsoft AI Dev Days Hackathon 2026</strong> &mdash; Agentic DevOps Track
+  Built for <strong>Microsoft AI Dev Days Hackathon 2026</strong> — Agentic DevOps Track
 </p>
