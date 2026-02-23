@@ -84,10 +84,14 @@ async def delete_scan(scan_id: str):
     if not scan:
         raise HTTPException(status_code=404, detail=f"Scan {scan_id} not found")
 
-    if scan.status == ScanStatus.RUNNING:
+    active_statuses = {
+        ScanStatus.QUEUED, ScanStatus.SCANNING, ScanStatus.ANALYZING,
+        ScanStatus.FIXING, ScanStatus.PROFILING, ScanStatus.COMPLIANCE_CHECK,
+    }
+    if scan.status in active_statuses:
         raise HTTPException(
             status_code=400,
-            detail="Cannot delete a running scan. Cancel it first.",
+            detail="Cannot delete an active scan. Cancel it first.",
         )
 
     deleted = scan_store.delete(scan_id)
