@@ -12,9 +12,10 @@ const userPreferences = {};
 // VULNERABLE: Deep merge without prototype pollution protection
 function deepMerge(target, source) {
   for (const key in source) {
-    // VULNERABLE: No check for __proto__, constructor, or prototype keys
-    // Attacker sends: { "__proto__": { "isAdmin": true } }
-    // This pollutes Object.prototype, making ALL objects have isAdmin = true
+    // FIXED: Prevent prototype pollution by disallowing __proto__, constructor, and prototype keys
+    if (key === '__proto__' || key === 'constructor' || key === 'prototype') {
+      continue;
+    }
     if (typeof source[key] === 'object' && source[key] !== null && !Array.isArray(source[key])) {
       if (!target[key]) target[key] = {};
       deepMerge(target[key], source[key]);
@@ -35,7 +36,6 @@ router.post('/preferences', (req, res) => {
     return res.status(400).json({ error: 'Invalid preferences payload' });
   }
 
-  // VULNERABLE: Using unsafe deep merge with user input
   if (!userPreferences[userId]) {
     userPreferences[userId] = { theme: 'light', notifications: true, language: 'en' };
   }
@@ -55,21 +55,31 @@ router.get('/preferences', (req, res) => {
   res.json({ preferences: prefs });
 });
 
-// VULNERABLE: Admin check relies on object property that can be polluted
+// FIXED: Admin check no longer depends on polluted user property; use explicit header token for admin auth
+// Also, sensitive secrets moved to environment variables
 // GET /api/settings/admin/config
 router.get('/admin/config', (req, res) => {
-  const user = { name: req.headers['x-user-name'] || 'guest' };
-
-  // VULNERABLE: After prototype pollution, user.isAdmin will be true for ANY user
-  if (!user.isAdmin) {
+  // Simple token-based admin authentication
+  const adminToken = req.headers['x-admin-token'];
+  if (!adminToken || adminToken !== process.env.ADMIN_API_TOKEN) {
     return res.status(403).json({ error: 'Admin access required' });
   }
 
-  // Sensitive configuration exposed after prototype pollution bypass
+  // Sensitive configuration loaded from environment variables, not hardcoded
   res.json({
-    database: { host: 'db-prod.internal', port: 5432, name: 'banking_prod' },
-    apiKeys: { stripe: 'sk_live_51ABC...redacted', sendgrid: 'SG.xxx...redacted' },
-    featureFlags: { maintenanceMode: false, debugLogging: true },
+    database: {
+      host: process.env.DB_HOST || 'db-prod.internal',
+      port: parseInt(process.env.DB_PORT, 10) || 5432,
+      name: process.env.DB_NAME || 'banking_prod',
+    },
+    apiKeys: {
+      stripe: process.env.STRIPE_SECRET_KEY || '',
+      sendgrid: process.env.SENDGRID_API_KEY || '',
+    },
+    featureFlags: {
+      maintenanceMode: process.env.MAINTENANCE_MODE === 'true',
+      debugLogging: process.env.DEBUG_LOGGING === 'true',
+    },
   });
 });
 
