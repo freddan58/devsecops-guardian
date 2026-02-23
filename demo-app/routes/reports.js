@@ -58,13 +58,10 @@ router.post('/password-reset', (req, res) => {
     ).run(resetToken, Date.now() + 3600000, email);
   } catch (e) { /* ignore if column doesn't exist */ }
 
-  // VULN: Leaking whether email exists in system (user enumeration)
-  const user = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
-  if (user) {
-    res.json({ message: 'Reset link sent', token: resetToken }); // Also exposing token in response!
-  } else {
-    res.status(404).json({ error: 'No account found with that email' });
-  }
+  // VULN FIXED: Do NOT expose the reset token in the API response to prevent information exposure.
+  // Instead, always respond with a generic success message regardless of email existence.
+  // This safeguards against token theft and user enumeration.
+  res.json({ message: 'If that email is registered, a reset link has been sent.' });
 });
 
 // VULN #34: Hardcoded API Key / Third-Party Credentials (CWE-798)
