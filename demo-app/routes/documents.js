@@ -35,6 +35,7 @@ router.get('/download', (req, res) => {
 });
 
 // GET /api/documents/preview - renders document content as HTML (also vulnerable to XSS)
+// Fixed stored XSS by escaping HTML special characters to prevent script injection
 router.get('/preview', (req, res) => {
   const { file } = req.query;
 
@@ -44,10 +45,20 @@ router.get('/preview', (req, res) => {
 
   const filePath = path.join(DOCS_DIR, file);
 
+  // Helper function to escape HTML special chars to prevent XSS
+  function escapeHtml(unsafe) {
+    return unsafe
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
   try {
     const content = fs.readFileSync(filePath, 'utf-8');
-    // VULNERABLE: Rendering file content directly as HTML without sanitization
-    res.send(`<html><body><pre>${content}</pre></body></html>`);
+    const safeContent = escapeHtml(content);
+    res.send(`<html><body><pre>${safeContent}</pre></body></html>`);
   } catch (err) {
     res.status(404).json({ error: 'Document not found' });
   }
