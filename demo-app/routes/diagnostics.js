@@ -85,19 +85,32 @@ router.post('/audit-log', (req, res) => {
   const userAgent = req.headers['user-agent'];
   const clientIp = req.headers['x-forwarded-for'] || req.ip;
 
-  // VULNERABLE: User-controlled values written directly to log
-  // Attacker can inject newlines to create fake log entries:
-  // action: "login\n[CRITICAL] Admin password changed by root from 10.0.0.1"
-  // This corrupts log integrity and can mislead forensic analysis
-  const logEntry = `[${new Date().toISOString()}] ACTION=${action} RESOURCE=${resource} IP=${clientIp} UA=${userAgent} DETAILS=${details}`;
+  // Fix: sanitize user inputs to remove newlines and control characters and limit length to prevent log injection
+  function sanitizeInput(input) {
+    if (typeof input !== 'string') return '';
+    // Remove any newline or control characters (except tab and space)
+    let sanitized = input.replace(/[\r\n\x00-\x1F\x7F]+/g, ' ');
+    // Limit length to 100 characters to prevent large logs
+    if (sanitized.length > 100) sanitized = sanitized.substring(0, 100);
+    return sanitized.trim();
+  }
 
-  // Write to file without sanitization
+  const safeAction = sanitizeInput(action);
+  const safeResource = sanitizeInput(resource);
+  const safeDetails = sanitizeInput(details);
+  const safeUserAgent = sanitizeInput(userAgent);
+  const safeClientIp = sanitizeInput(clientIp);
+
+  const logEntry = `[${new Date().toISOString()}] ACTION=${safeAction} RESOURCE=${safeResource} IP=${safeClientIp} UA=${safeUserAgent} DETAILS=${safeDetails}`;
+
+  // Write sanitized log entry to file
   fs.appendFileSync('/tmp/audit.log', logEntry + '\n');
   console.log(logEntry);
 
+  // Do not return raw log entry to avoid exposing unsanitized input
   res.json({
     logged: true,
-    entry: logEntry,  // Also returns the raw log entry to the attacker
+    entry: '[REDACTED]', // Avoid exposing raw log entry to prevent log injection via response
     log_file: '/tmp/audit.log',  // Exposes internal file path
   });
 });
