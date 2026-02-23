@@ -7,10 +7,19 @@ const express = require('express');
 const router = express.Router();
 const { execSync } = require('child_process');
 
-// VULNERABLE: Using eval() for "flexible" query parsing
+// Helper function to safely parse filter expressions as JSON
+function safeParseFilter(filter) {
+  // Accept only JSON formatted strings as filter expressions
+  // This avoids using eval and prevents remote code execution
+  try {
+    return JSON.parse(filter);
+  } catch (error) {
+    throw new Error('Invalid filter format. Expected JSON string.');
+  }
+}
+
 // POST /api/export/query
-// Body: { "filter": "({amount: {$gt: 1000}})" }
-// Exploit: { "filter": "(require('child_process').execSync('cat /etc/passwd').toString())" }
+// Body: { "filter": "{\"amount\": {\"$gt\": 1000}}" }
 router.post('/query', (req, res) => {
   const { filter, format } = req.body;
 
@@ -19,9 +28,9 @@ router.post('/query', (req, res) => {
   }
 
   try {
-    // VULNERABLE: eval() on user input - Remote Code Execution
-    // "We need eval for flexible query expressions" - famous last words
-    const parsedFilter = eval(filter);
+    // FIXED: Replaced unsafe eval() with safe JSON.parse to prevent Remote Code Execution (CWE-502)
+    // Only allow JSON formatted filter expressions
+    const parsedFilter = safeParseFilter(filter);
 
     // Simulate filtered data export
     const mockData = [
@@ -33,7 +42,7 @@ router.post('/query', (req, res) => {
     res.json({
       format: format || 'json',
       results: mockData,
-      filter_applied: String(parsedFilter),
+      filter_applied: JSON.stringify(parsedFilter),
     });
   } catch (err) {
     res.status(400).json({ error: `Invalid filter expression: ${err.message}` });
