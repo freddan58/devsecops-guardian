@@ -32,9 +32,18 @@ router.get('/:id', authenticateToken, (req, res) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    // VULN #45: Mass Data Exposure (CWE-200)
-    // Returns SSN, salary, bank account - far more than needed
-    // Should only return id, username, email for non-owner requests
+    // FIX #45: Limit returned fields for non-owner to prevent Mass Data Exposure
+    if (req.user.id !== id) {
+      // Only return id, username, and email for non-owner requests
+      const limitedProfile = {
+        id: user.id,
+        username: user.username,
+        email: user.email
+      };
+      return res.json({ profile: limitedProfile });
+    }
+
+    // Owner can see full profile as before
     res.json({ profile: user });
   } catch (err) {
     res.status(500).json({ error: 'Profile fetch failed', details: err.message });
