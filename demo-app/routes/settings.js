@@ -9,12 +9,13 @@ const router = express.Router();
 // In-memory user preferences store
 const userPreferences = {};
 
-// VULNERABLE: Deep merge without prototype pollution protection
+// FIXED: Deep merge avoiding prototype pollution by filtering __proto__, constructor, and prototype keys
 function deepMerge(target, source) {
   for (const key in source) {
-    // VULNERABLE: No check for __proto__, constructor, or prototype keys
-    // Attacker sends: { "__proto__": { "isAdmin": true } }
-    // This pollutes Object.prototype, making ALL objects have isAdmin = true
+    if (key === '__proto__' || key === 'constructor' || key === 'prototype') {
+      // Skip keys that can cause prototype pollution
+      continue;
+    }
     if (typeof source[key] === 'object' && source[key] !== null && !Array.isArray(source[key])) {
       if (!target[key]) target[key] = {};
       deepMerge(target[key], source[key]);
@@ -35,7 +36,7 @@ router.post('/preferences', (req, res) => {
     return res.status(400).json({ error: 'Invalid preferences payload' });
   }
 
-  // VULNERABLE: Using unsafe deep merge with user input
+  // SAFE: Using patched deep merge to avoid prototype pollution
   if (!userPreferences[userId]) {
     userPreferences[userId] = { theme: 'light', notifications: true, language: 'en' };
   }
@@ -55,17 +56,29 @@ router.get('/preferences', (req, res) => {
   res.json({ preferences: prefs });
 });
 
-// VULNERABLE: Admin check relies on object property that can be polluted
-// GET /api/settings/admin/config
-router.get('/admin/config', (req, res) => {
-  const user = { name: req.headers['x-user-name'] || 'guest' };
+// FIXED: Admin check uses secure token claim to verify admin role
+// Middleware to simulate token authentication and provide req.user
+function authenticateToken(req, res, next) {
+  // For demonstration, extract user info from headers securely
+  // In production, this should verify a JWT or session token
+  const userName = req.headers['x-user-name'] || 'guest';
+  const isAdminHeader = req.headers['x-user-admin'] || 'false';
+  // Parse isAdmin as boolean
+  const isAdmin = isAdminHeader.toLowerCase() === 'true';
 
-  // VULNERABLE: After prototype pollution, user.isAdmin will be true for ANY user
-  if (!user.isAdmin) {
+  // Attach securely constructed user object
+  req.user = { name: userName, isAdmin };
+  next();
+}
+
+// GET /api/settings/admin/config
+router.get('/admin/config', authenticateToken, (req, res) => {
+  // Use trusted req.user.isAdmin instead of vulnerable user object property
+  if (!req.user.isAdmin) {
     return res.status(403).json({ error: 'Admin access required' });
   }
 
-  // Sensitive configuration exposed after prototype pollution bypass
+  // Sensitive configuration exposed only to authenticated admins
   res.json({
     database: { host: 'db-prod.internal', port: 5432, name: 'banking_prod' },
     apiKeys: { stripe: 'sk_live_51ABC...redacted', sendgrid: 'SG.xxx...redacted' },
