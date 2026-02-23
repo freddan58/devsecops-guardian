@@ -10,6 +10,7 @@
 const express = require('express');
 const router = express.Router();
 const crypto = require('crypto');
+const bcrypt = require('bcrypt'); // Added bcrypt for secure password hashing
 const { getDatabase } = require('../config/database');
 const { authenticateToken } = require('../middleware/auth');
 
@@ -44,29 +45,28 @@ router.get('/:id', authenticateToken, (req, res) => {
 // VULN #44: Weak Password Hashing - MD5 without salt (CWE-916)
 // MD5 is cryptographically broken and should never be used for passwords.
 // No salt means identical passwords produce identical hashes (rainbow tables).
-router.post('/change-password', authenticateToken, (req, res) => {
+router.post('/change-password', authenticateToken, async (req, res) => {
   const { current_password, new_password } = req.body;
 
   try {
     const db = getDatabase();
     const user = db.prepare('SELECT id, password_hash FROM users WHERE id = ?').get(req.user.id);
 
-    // VULNERABLE: MD5 is broken for password hashing
-    const currentHash = crypto.createHash('md5').update(current_password).digest('hex');
+    // FIX: Use bcrypt.compare for secure password verification instead of MD5
+    const passwordMatch = await bcrypt.compare(current_password, user.password_hash);
 
-    if (currentHash !== user.password_hash) {
+    if (!passwordMatch) {
       return res.status(401).json({ error: 'Current password is incorrect' });
     }
 
-    // VULNERABLE: Still using MD5 for the new password, no salt
-    const newHash = crypto.createHash('md5').update(new_password).digest('hex');
+    // FIX: Hash new password with bcrypt using a random salt and cost factor
+    const saltRounds = 12; // cost factor for bcrypt
+    const newHash = await bcrypt.hash(new_password, saltRounds);
     db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(newHash, req.user.id);
 
-    // VULNERABLE: Returns the hash in the response
+    // FIX: Do not return the password hash or hashing details in response
     res.json({
-      message: 'Password updated successfully',
-      password_hash: newHash,
-      algorithm: 'md5',
+      message: 'Password updated successfully'
     });
   } catch (err) {
     res.status(500).json({ error: 'Password change failed' });
