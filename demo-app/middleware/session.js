@@ -63,15 +63,59 @@ function attachUserToSession(sessionId, userId, userData) {
 }
 
 // VULN #39: Session data stored in plaintext cookie (CWE-315)
+// FIX: Use AES-256-GCM encryption with HMAC signing to protect session cookie from tampering and disclosure
+const ENCRYPTION_KEY = Buffer.from(process.env.SESSION_ENCRYPTION_KEY, 'hex'); // Must be 32 bytes hex string
+const HMAC_KEY = Buffer.from(process.env.SESSION_HMAC_KEY, 'hex'); // Must be 32 bytes hex string
+const IV_LENGTH = 12; // For AES-GCM, 12 bytes IV recommended
+
 function serializeSession(sessionData) {
-  // Storing session data directly in cookie without encryption or signing
-  // Attacker can decode base64, modify role to "admin", re-encode
-  return Buffer.from(JSON.stringify(sessionData)).toString('base64');
+  const json = JSON.stringify(sessionData);
+  const iv = crypto.randomBytes(IV_LENGTH);
+  const cipher = crypto.createCipheriv('aes-256-gcm', ENCRYPTION_KEY, iv);
+  let encrypted = cipher.update(json, 'utf8');
+  encrypted = Buffer.concat([encrypted, cipher.final()]);
+  const tag = cipher.getAuthTag();
+
+  // Payload = iv + tag + encrypted data
+  const payload = Buffer.concat([iv, tag, encrypted]);
+
+  // Compute HMAC over payload for integrity
+  const hmac = crypto.createHmac('sha256', HMAC_KEY).update(payload).digest();
+
+  // Final cookie value = payload + hmac, base64 encoded
+  const cookieValue = Buffer.concat([payload, hmac]).toString('base64');
+
+  return cookieValue;
 }
 
 function deserializeSession(cookieValue) {
   try {
-    return JSON.parse(Buffer.from(cookieValue, 'base64').toString());
+    const data = Buffer.from(cookieValue, 'base64');
+
+    if (data.length < IV_LENGTH + 16 + 32) { // iv + tag + minimum ciphertext + hmac
+      return null; // too short to be valid
+    }
+
+    const iv = data.slice(0, IV_LENGTH);
+    const tag = data.slice(IV_LENGTH, IV_LENGTH + 16);
+    const encrypted = data.slice(IV_LENGTH + 16, data.length - 32);
+    const hmac = data.slice(data.length - 32);
+
+    const payload = data.slice(0, data.length - 32);
+
+    // Verify HMAC
+    const expectedHmac = crypto.createHmac('sha256', HMAC_KEY).update(payload).digest();
+    if (!crypto.timingSafeEqual(hmac, expectedHmac)) {
+      return null; // HMAC verification failed
+    }
+
+    // Decrypt
+    const decipher = crypto.createDecipheriv('aes-256-gcm', ENCRYPTION_KEY, iv);
+    decipher.setAuthTag(tag);
+    let decrypted = decipher.update(encrypted);
+    decrypted = Buffer.concat([decrypted, decipher.final()]);
+
+    return JSON.parse(decrypted.toString('utf8'));
   } catch (e) {
     return null;
   }
