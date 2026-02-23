@@ -49,9 +49,11 @@ router.post('/send', authenticateToken, async (req, res) => {
 router.post('/request', authenticateToken, (req, res) => {
   const { amount, description } = req.body;
 
-  // Using Math.random() for security-sensitive transaction reference
-  const transactionRef = 'TXN-' + Math.random().toString(36).substr(2, 9);
-  const verificationCode = Math.floor(Math.random() * 9000) + 1000; // 4-digit PIN
+  // Secure random transaction reference using crypto.randomBytes - fixes CWE-330
+  const transactionRef = 'TXN-' + crypto.randomBytes(6).toString('hex');
+
+  // Secure 4-digit verification code generation using crypto.randomInt
+  const verificationCode = crypto.randomInt(1000, 10000); // 4-digit PIN
 
   const db = getDatabase();
   db.prepare(
