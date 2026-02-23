@@ -22,7 +22,7 @@ const corsOptions = {
   credentials: true,              // Sends cookies with cross-origin requests
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['*'],          // Allows any header
-  exposedHeaders: ['Set-Cookie', 'Authorization', 'X-Session-Token'],
+  exposedHeaders: [],             // Removed sensitive headers to prevent info disclosure
   maxAge: 86400 * 30,             // Cache preflight for 30 days
 };
 
@@ -50,8 +50,13 @@ function insecureHeaders(req, res, next) {
   // Remove dangerous headers that disclose internal implementation details
   // Do NOT set 'X-Powered-By', 'Server', 'X-Debug-Mode'
 
-  // Preserve CORS headers as in original implementation
-  res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
+  // Fix applied to restrict Access-Control-Allow-Origin to whitelist and avoid wildcard with credentials
+  const origin = req.headers.origin;
+  if (origin && allowedOrigins.indexOf(origin) !== -1) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  } else {
+    res.setHeader('Access-Control-Allow-Origin', ''); // Deny unknown origins to prevent info leakage
+  }
   res.setHeader('Access-Control-Allow-Credentials', 'true');
 
   next();
