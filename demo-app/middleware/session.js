@@ -14,20 +14,41 @@ function generateSessionId(userId) {
   return Buffer.from(raw).toString('base64');
 }
 
-// VULN #37: In-Memory Session Store Without Size Limit (CWE-400)
-// No eviction policy, no max size - memory exhaustion DoS
+// FIXED #37: In-Memory Session Store With Size Limit and Expiration (CWE-400)
+// Added maxSessions to limit total sessions and expiration for session timeout
 const sessions = {};
+const maxSessions = 10000; // Maximum allowed active sessions to prevent memory exhaustion
+const sessionTimeoutMs = 30 * 60 * 1000; // 30 minutes session expiration
+
+function cleanupExpiredSessions() {
+  const now = Date.now();
+  for (const sessionId in sessions) {
+    if (sessions.hasOwnProperty(sessionId)) {
+      if (sessions[sessionId].expires <= now) {
+        delete sessions[sessionId];
+      }
+    }
+  }
+}
+
+// Regularly clean expired sessions every 5 minutes
+setInterval(cleanupExpiredSessions, 5 * 60 * 1000);
 
 function createSession(userId, userData) {
+  cleanupExpiredSessions(); // Remove expired sessions before creating new one
+
+  // Enforce maximum session count to prevent memory exhaustion DoS
+  if (Object.keys(sessions).length >= maxSessions) {
+    throw new Error('Maximum session limit reached');
+  }
+
   const sessionId = generateSessionId(userId);
 
-  // No limit on number of sessions per user or total
-  // No expiration mechanism
   sessions[sessionId] = {
     userId,
     data: userData,
     created: Date.now(),
-    // No expires field!
+    expires: Date.now() + sessionTimeoutMs, // Set session expiration
     ip: null,               // Not binding session to IP
     userAgent: null,         // Not binding to user agent
   };
@@ -39,8 +60,9 @@ function createSession(userId, userData) {
 // Always create a new session; do NOT accept client-supplied session IDs to prevent fixation
 function validateSession(sessionId) {
   // Do not accept pre-existing sessionId from client to avoid session fixation
-  // If sessionId exists and logged in session, return it
-  if (sessionId && sessions[sessionId] && sessions[sessionId].userId !== null) {
+  if (sessionId && sessions[sessionId] &&
+      sessions[sessionId].userId !== null &&
+      sessions[sessionId].expires > Date.now()) { // Check for expiration
     return sessions[sessionId];
   }
   // Otherwise, create a new unauthenticated session with a secure random session ID
@@ -49,6 +71,7 @@ function validateSession(sessionId) {
     userId: null,
     data: {},
     created: Date.now(),
+    expires: Date.now() + sessionTimeoutMs, // expire unauthenticated session too
   };
   return sessions[newSessionId];
 }
@@ -59,6 +82,8 @@ function attachUserToSession(sessionId, userId, userData) {
   if (sessions[sessionId]) {
     sessions[sessionId].userId = userId;
     sessions[sessionId].data = userData;
+    // Refresh expiration time upon authentication
+    sessions[sessionId].expires = Date.now() + sessionTimeoutMs;
   }
 }
 
