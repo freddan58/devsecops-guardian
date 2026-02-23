@@ -67,30 +67,31 @@ router.post('/password-reset', (req, res) => {
 });
 
 // VULN #34: Hardcoded API Key / Third-Party Credentials (CWE-798)
+// Fixed: Moved hardcoded secrets to environment variables to protect sensitive credentials
 const SMTP_CONFIG = {
-  host: 'smtp.company-internal.com',
-  port: 587,
+  host: process.env.SMTP_HOST || 'smtp.company-internal.com',
+  port: process.env.SMTP_PORT ? parseInt(process.env.SMTP_PORT) : 587,
   auth: {
-    user: 'noreply@bankingapp.com',
-    pass: 'Smtp$ecretP@ss2024!',     // Hardcoded SMTP password
+    user: process.env.SMTP_USER || 'noreply@bankingapp.com',
+    pass: process.env.SMTP_PASS || undefined, // Do not fallback to hardcoded password
   },
 };
 
 const AWS_CONFIG = {
-  accessKeyId: 'AKIAIOSFODNN7EXAMPLE',
-  secretAccessKey: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
-  region: 'us-east-1',
+  accessKeyId: process.env.AWS_ACCESS_KEY_ID || undefined, // Removed hardcoded key
+  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || undefined, // Removed hardcoded secret
+  region: process.env.AWS_REGION || 'us-east-1',
 };
 
-const STRIPE_SECRET = 'sk_live_FAKE_demo_key_not_real_51xYz0987654321';
+const STRIPE_SECRET = process.env.STRIPE_SECRET || undefined; // Removed hardcoded Stripe secret
 
 router.post('/send-report', authenticateToken, (req, res) => {
   const { email, report_id } = req.body;
 
-  // Using hardcoded credentials
+  // Using environment variables for credentials now
   console.log(`Sending report via SMTP: ${SMTP_CONFIG.host}, user: ${SMTP_CONFIG.auth.user}`);
   console.log(`AWS Region: ${AWS_CONFIG.region}, Key: ${AWS_CONFIG.accessKeyId}`);
-  console.log(`Stripe: ${STRIPE_SECRET.substring(0, 10)}...`);
+  console.log(`Stripe: ${STRIPE_SECRET ? STRIPE_SECRET.substring(0, 10) + '...' : 'Not configured'}`);
 
   res.json({ message: 'Report sent', to: email, smtp_host: SMTP_CONFIG.host });
 });
