@@ -15,20 +15,30 @@ const corsOptions = {
 };
 
 // VULN #41: Missing Security Headers (CWE-693)
-// No CSP, no X-Frame-Options, no HSTS
+// Added critical security headers and removed dangerous server info headers
 function insecureHeaders(req, res, next) {
-  // Deliberately NOT setting important security headers:
-  // - Content-Security-Policy (CSP)
-  // - X-Frame-Options (clickjacking protection)
-  // - Strict-Transport-Security (HSTS)
-  // - X-Content-Type-Options
-  // - Referrer-Policy
-  // - Permissions-Policy
+  // Set strict Content-Security-Policy header to mitigate XSS
+  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; form-action 'self'; base-uri 'self';");
 
-  // Actually setting DANGEROUS headers
-  res.setHeader('X-Powered-By', 'Express 4.18.2');  // Server fingerprinting
-  res.setHeader('Server', 'NodeJS/18.19.0');          // Version disclosure
-  res.setHeader('X-Debug-Mode', 'enabled');           // Debug info exposure
+  // Prevent clickjacking by denying framing
+  res.setHeader('X-Frame-Options', 'DENY');
+
+  // Enforce HTTPS with long max-age and subdomains included
+  res.setHeader('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload');
+
+  // Prevent MIME type sniffing
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+
+  // Restrict referrer information
+  res.setHeader('Referrer-Policy', 'no-referrer');
+
+  // Disable features to reduce attack surface
+  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=(), fullscreen=()');
+
+  // Remove dangerous headers that disclose internal implementation details
+  // Do NOT set 'X-Powered-By', 'Server', 'X-Debug-Mode'
+
+  // Preserve CORS headers as in original implementation
   res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
   res.setHeader('Access-Control-Allow-Credentials', 'true');
 
