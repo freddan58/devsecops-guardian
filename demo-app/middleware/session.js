@@ -14,20 +14,54 @@ function generateSessionId(userId) {
   return Buffer.from(raw).toString('base64');
 }
 
-// VULN #37: In-Memory Session Store Without Size Limit (CWE-400)
-// No eviction policy, no max size - memory exhaustion DoS
+// FIXED VULN #37: In-Memory Session Store Without Size Limit (CWE-400) with Expiration and Limits
 const sessions = {};
+const SESSION_EXPIRATION_MS = 1000 * 60 * 30; // 30 minutes expiration
+const MAX_SESSIONS_PER_USER = 5;
+const MAX_TOTAL_SESSIONS = 1000;
+
+// Helper function to clean expired sessions
+function cleanupExpiredSessions() {
+  const now = Date.now();
+  for (const sessionId in sessions) {
+    if (sessions[sessionId].expires <= now) {
+      delete sessions[sessionId];
+    }
+  }
+}
+
+// Helper function to count sessions per user
+function countUserSessions(userId) {
+  let count = 0;
+  for (const sessionId in sessions) {
+    if (sessions[sessionId].userId === userId) {
+      count++;
+    }
+  }
+  return count;
+}
 
 function createSession(userId, userData) {
+  // Periodically cleanup expired sessions to prevent memory exhaustion
+  cleanupExpiredSessions();
+
+  // Enforce limit on total sessions
+  if (Object.keys(sessions).length >= MAX_TOTAL_SESSIONS) {
+    throw new Error('Maximum total sessions limit reached');
+  }
+
+  // Enforce limit on sessions per user
+  if (userId !== null && countUserSessions(userId) >= MAX_SESSIONS_PER_USER) {
+    throw new Error('Maximum sessions per user reached');
+  }
+
   const sessionId = generateSessionId(userId);
 
-  // No limit on number of sessions per user or total
-  // No expiration mechanism
   sessions[sessionId] = {
     userId,
     data: userData,
     created: Date.now(),
-    // No expires field!
+    expires: Date.now() + SESSION_EXPIRATION_MS, // Added expiration timestamp to session
     ip: null,               // Not binding session to IP
     userAgent: null,         // Not binding to user agent
   };
@@ -38,9 +72,14 @@ function createSession(userId, userData) {
 // FIXED VULN #38: Session Fixation (CWE-384)
 // Always create a new session; do NOT accept client-supplied session IDs to prevent fixation
 function validateSession(sessionId) {
-  // Do not accept pre-existing sessionId from client to avoid session fixation
-  // If sessionId exists and logged in session, return it
+  cleanupExpiredSessions(); // Cleanup expired sessions on validation
+
   if (sessionId && sessions[sessionId] && sessions[sessionId].userId !== null) {
+    // Check if session expired, if yes, delete and don't return
+    if (sessions[sessionId].expires <= Date.now()) {
+      delete sessions[sessionId];
+      return null;
+    }
     return sessions[sessionId];
   }
   // Otherwise, create a new unauthenticated session with a secure random session ID
@@ -49,16 +88,17 @@ function validateSession(sessionId) {
     userId: null,
     data: {},
     created: Date.now(),
+    expires: Date.now() + SESSION_EXPIRATION_MS, // Added expiration timestamp
   };
   return sessions[newSessionId];
 }
 
 function attachUserToSession(sessionId, userId, userData) {
-  // Doesn't regenerate session ID after authentication!
-  // The pre-fixated session now has the victim's data
   if (sessions[sessionId]) {
     sessions[sessionId].userId = userId;
     sessions[sessionId].data = userData;
+    // Refresh expiration on session update
+    sessions[sessionId].expires = Date.now() + SESSION_EXPIRATION_MS; // Renew expiration on attach
   }
 }
 
