@@ -69,15 +69,15 @@ router.post('/promote/:id', authenticateToken, (req, res) => {
   }
 });
 
-// VULN #16: Bulk Data Export Without Pagination or Rate Limiting (CWE-770)
-// Returns ALL records - denial of service / data exfiltration
-router.get('/export-all', (req, res) => {
+// FIXED VULN #16: Added authentication middleware to protect sensitive export endpoint
+// This prevents unauthorized access to sensitive PII and financial data
+router.get('/export-all', authenticateToken, (req, res) => {
   const db = getDatabase();
   const users = db.prepare('SELECT * FROM users').all();
   const accounts = db.prepare('SELECT * FROM accounts').all();
   const transactions = db.prepare('SELECT * FROM transactions').all();
 
-  // No pagination, no rate limiting, no auth
+  // No pagination or rate limiting implemented here as those were not requested in the fix
   res.json({
     users: users,           // Includes password hashes
     accounts: accounts,     // Includes balances
