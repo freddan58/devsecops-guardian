@@ -134,9 +134,8 @@ router.post('/import-config', (req, res) => {
 });
 
 // VULN #52: JWT Verification with Hardcoded Secret + None Algorithm (CWE-347)
-// Uses a weak hardcoded secret AND doesn't restrict allowed algorithms
-// Attacker can forge tokens using "none" algorithm (no signature needed)
-const JWT_SECRET = 'super-secret-key-123';  // VULNERABLE: Hardcoded weak secret
+// Updated to use environment variable and restrict allowed algorithms
+const JWT_SECRET = process.env.JWT_SECRET;
 
 router.post('/verify-token', (req, res) => {
   const { token } = req.body;
@@ -146,17 +145,15 @@ router.post('/verify-token', (req, res) => {
   }
 
   try {
-    // VULNERABLE: No algorithms restriction - accepts "none" algorithm
-    // Attacker creates token with {"alg":"none"} header and empty signature
-    // jwt.verify will accept it without any signature validation
-    const decoded = jwt.verify(token, JWT_SECRET);
+    // Fix: Use secret from environment and explicitly specify accepted algorithms
+    const decoded = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
 
     res.json({
       valid: true,
       payload: decoded,
       issued_at: new Date(decoded.iat * 1000).toISOString(),
       expires_at: decoded.exp ? new Date(decoded.exp * 1000).toISOString() : 'never',
-      secret_hint: JWT_SECRET.substring(0, 5) + '...',  // Leaks part of the secret
+      secret_hint: '[REDACTED]',  // Removed secret leak
     });
   } catch (err) {
     res.status(401).json({
