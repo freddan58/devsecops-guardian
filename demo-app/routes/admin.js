@@ -45,17 +45,19 @@ router.put('/users/:id', authenticateToken, (req, res) => {
 // VULN #14: Debug/Admin Endpoint Exposed Without Auth (CWE-489)
 // Added authentication middleware to restrict access to authorized users only
 router.get('/debug', authenticateToken, (req, res) => {
+  // SECURITY FIX: Restrict debug info to non-sensitive metadata and require admin role
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Forbidden: Admins only' });
+  }
+
   const db = getDatabase();
   const tables = db.prepare(
     "SELECT name, sql FROM sqlite_master WHERE type='table'"
   ).all();
 
-  const users = db.prepare('SELECT * FROM users').all();
-
   res.json({
-    environment: process.env,       // Leaks ALL env vars including secrets
+    // Removed environment and user data to prevent sensitive information exposure
     database_schema: tables,
-    all_users: users,               // Leaks password hashes
     node_version: process.version,
     memory_usage: process.memoryUsage(),
     uptime: process.uptime(),
