@@ -5,13 +5,12 @@
 
 const crypto = require('crypto');
 
-// FIXED #36: Use cryptographically secure random values for session IDs
-function generateSessionId(userId) {
+// FIXED #36 and SCAN-006: Use cryptographically secure random values for session IDs
+// Removed userId from session ID to prevent session ID predictability and user profiling
+function generateSessionId() {
   // Generate 16 bytes (128 bits) of cryptographically secure random data
   const randomBytes = crypto.randomBytes(16).toString('hex');
-  // Combine with userId for session identification, but do not rely on this for entropy
-  const raw = `${randomBytes}-${userId}`;
-  return Buffer.from(raw).toString('base64');
+  return Buffer.from(randomBytes).toString('base64');
 }
 
 // VULN #37: In-Memory Session Store Without Size Limit (CWE-400)
@@ -19,7 +18,7 @@ function generateSessionId(userId) {
 const sessions = {};
 
 function createSession(userId, userData) {
-  const sessionId = generateSessionId(userId);
+  const sessionId = generateSessionId();
 
   // No limit on number of sessions per user or total
   // No expiration mechanism
