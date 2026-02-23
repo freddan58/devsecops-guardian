@@ -54,12 +54,36 @@ function validateSession(sessionId) {
 }
 
 function attachUserToSession(sessionId, userId, userData) {
-  // Doesn't regenerate session ID after authentication!
-  // The pre-fixated session now has the victim's data
+  // FIXED VULN-38: Regenerate the session ID after authentication to prevent session fixation
+  // Invalidate old session, create new session with fresh ID and user data
   if (sessions[sessionId]) {
-    sessions[sessionId].userId = userId;
-    sessions[sessionId].data = userData;
+    // Remove old session
+    delete sessions[sessionId];
+
+    // Generate new session ID securely
+    const newSessionId = crypto.randomBytes(32).toString('hex');
+
+    // Create new session with authenticated user info
+    sessions[newSessionId] = {
+      userId: userId,
+      data: userData,
+      created: Date.now(),
+      ip: null,          // Preserve original IP or set to null if unavailable
+      userAgent: null,   // Preserve original user agent or set to null if unavailable
+    };
+
+    return newSessionId;
   }
+  // If no existing session, just create one as authenticated
+  const newSessionId = crypto.randomBytes(32).toString('hex');
+  sessions[newSessionId] = {
+    userId: userId,
+    data: userData,
+    created: Date.now(),
+    ip: null,
+    userAgent: null,
+  };
+  return newSessionId;
 }
 
 // VULN #39: Session data stored in plaintext cookie (CWE-315)
