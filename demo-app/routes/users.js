@@ -46,12 +46,23 @@ router.get('/profile', authenticateToken, (req, res) => {
   res.json({ data: user });
 });
 
-// FIXED: DELETE now requires authentication
+// FIXED: DELETE now requires authentication and authorization
 router.delete('/:id', authenticateToken, (req, res) => {
   const { id } = req.params;
 
   try {
     const db = getDatabase();
+    const userToDelete = db.prepare('SELECT id, role FROM users WHERE id = ?').get(id);
+
+    if (!userToDelete) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Security fix: Check that requester is deleting own account or is admin
+    if (req.user.id !== userToDelete.id && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Forbidden: insufficient privileges to delete this user' });
+    }
+
     const result = db.prepare('DELETE FROM users WHERE id = ?').run(id);
 
     if (result.changes === 0) {
