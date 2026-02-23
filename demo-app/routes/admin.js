@@ -30,8 +30,8 @@ router.put('/users/:id', authenticateToken, (req, res) => {
 });
 
 // VULN #14: Debug/Admin Endpoint Exposed Without Auth (CWE-489)
-// Leaks full database schema, environment variables, and internal state
-router.get('/debug', (req, res) => {
+// Added authentication middleware to restrict access to authorized users only
+router.get('/debug', authenticateToken, (req, res) => {
   const db = getDatabase();
   const tables = db.prepare(
     "SELECT name, sql FROM sqlite_master WHERE type='table'"
