@@ -14,16 +14,13 @@ const { getDatabase } = require('../config/database');
 const { authenticateToken } = require('../middleware/auth');
 
 // VULN #43: Horizontal IDOR - No ownership check (CWE-639)
-// Any authenticated user can view ANY other user's full profile
-// by changing the :id parameter. No authorization check that
-// req.user.id matches the requested profile ID.
+// Fixed: Added ownership check - only owners or admins can see full info; others get limited info
 router.get('/:id', authenticateToken, (req, res) => {
   const { id } = req.params;
 
   try {
     const db = getDatabase();
-    // VULNERABLE: No check that req.user.id === id
-    // Any logged-in user can access any profile
+    // Fetch the user's full profile from DB
     const user = db.prepare(
       'SELECT id, username, email, role, ssn, date_of_birth, phone, address, salary, bank_account FROM users WHERE id = ?'
     ).get(id);
@@ -32,9 +29,18 @@ router.get('/:id', authenticateToken, (req, res) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    // VULN #45: Mass Data Exposure (CWE-200)
-    // Returns SSN, salary, bank account - far more than needed
-    // Should only return id, username, email for non-owner requests
+    // SECURITY FIX: Check if requester is the owner or has admin role
+    if (req.user.id !== user.id && req.user.role !== 'admin') {
+      // Restrict sensitive fields for non-owners/non-admins
+      const limitedProfile = {
+        id: user.id,
+        username: user.username,
+        email: user.email
+      };
+      return res.json({ profile: limitedProfile });
+    }
+
+    // Owners or admins get full profile
     res.json({ profile: user });
   } catch (err) {
     res.status(500).json({ error: 'Profile fetch failed', details: err.message });
