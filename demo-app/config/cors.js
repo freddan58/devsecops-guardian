@@ -13,7 +13,8 @@ const allowedOrigins = [
 
 const corsOptions = {
   origin: function (origin, callback) {
-    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+    // SECURITY FIX: Reject requests with undefined origin when credentials are enabled to prevent credential leakage
+    if (origin && allowedOrigins.indexOf(origin) !== -1) {
       callback(null, true);
     } else {
       callback(new Error('Not allowed by CORS'));
