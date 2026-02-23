@@ -36,16 +36,14 @@ router.post('/send', authenticateToken, (req, res) => {
 });
 
 // VULN #28: Regex Denial of Service / ReDoS (CWE-1333)
-// Evil regex with catastrophic backtracking on crafted input
+// Fixed: Replaced vulnerable regex with safer regex for email validation
+const safeEmailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+
 router.post('/validate-email', (req, res) => {
   const { email } = req.body;
 
-  // This regex has catastrophic backtracking:
-  // Input like "aaaaaaaaaaaaaaaaaaaaaaaaaaaa!" will hang the server
-  const emailRegex = /^([a-zA-Z0-9])(([\-.]|[_]+)?([a-zA-Z0-9]+))*(@){1}[a-z0-9]+[.]{1}(([a-z]{2,3})|([a-z]{2,3}[.]{1}[a-z]{2,3}))$/;
-
   const startTime = Date.now();
-  const isValid = emailRegex.test(email);
+  const isValid = safeEmailRegex.test(email);
   const elapsed = Date.now() - startTime;
 
   res.json({ email, valid: isValid, processing_time_ms: elapsed });
