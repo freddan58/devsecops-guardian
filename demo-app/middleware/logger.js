@@ -23,12 +23,28 @@ function redactSensitiveData(obj) {
   return obj;
 }
 
+function redactSensitiveHeaders(headers) {
+  const sensitiveHeaderFields = ['authorization', 'cookie'];
+  const redactedHeaders = {};
+  for (const key in headers) {
+    if (Object.prototype.hasOwnProperty.call(headers, key)) {
+      if (sensitiveHeaderFields.includes(key.toLowerCase())) {
+        redactedHeaders[key] = '[REDACTED]'; // Fixed: Redact sensitive headers to prevent token leakage in logs
+      } else {
+        redactedHeaders[key] = headers[key];
+      }
+    }
+  }
+  return redactedHeaders;
+}
+
 function requestLogger(req, res, next) {
   const timestamp = new Date().toISOString();
 
   // Fixed: Avoid logging full request body with sensitive PII by redacting sensitive fields
   console.log(`[${timestamp}] ${req.method} ${req.originalUrl}`);
-  console.log(`[${timestamp}] Headers:`, JSON.stringify(req.headers));
+  const sanitizedHeaders = redactSensitiveHeaders(req.headers);
+  console.log(`[${timestamp}] Headers:`, JSON.stringify(sanitizedHeaders));
 
   if (req.body && Object.keys(req.body).length > 0) {
     const sanitizedBody = redactSensitiveData(req.body);
