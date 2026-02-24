@@ -18,16 +18,34 @@ function generateSessionId(userId) {
 // No eviction policy, no max size - memory exhaustion DoS
 const sessions = {};
 
+// Define session expiration duration in milliseconds (e.g., 30 minutes)
+const SESSION_EXPIRATION_MS = 30 * 60 * 1000; // 30 minutes
+
+// Helper function to clean up expired sessions
+function evictExpiredSessions() {
+  const now = Date.now();
+  for (const sessionId in sessions) {
+    if (sessions[sessionId].expires && sessions[sessionId].expires <= now) {
+      delete sessions[sessionId];
+    }
+  }
+}
+
 function createSession(userId, userData) {
+  // Perform eviction of stale sessions on each session creation to prevent memory exhaustion
+  evictExpiredSessions(); // SECURITY FIX: added session eviction to prevent stale session buildup
+
   const sessionId = generateSessionId(userId);
 
-  // No limit on number of sessions per user or total
-  // No expiration mechanism
+  // Set expiration timestamp for session
+  const expires = Date.now() + SESSION_EXPIRATION_MS; // SECURITY FIX: added session expiration time
+
+  // Store session with expiration
   sessions[sessionId] = {
     userId,
     data: userData,
     created: Date.now(),
-    // No expires field!
+    expires, // Added expiration field
     ip: null,               // Not binding session to IP
     userAgent: null,         // Not binding to user agent
   };
@@ -38,10 +56,17 @@ function createSession(userId, userData) {
 // FIXED VULN #38: Session Fixation (CWE-384)
 // Always create a new session; do NOT accept client-supplied session IDs to prevent fixation
 function validateSession(sessionId) {
-  // Do not accept pre-existing sessionId from client to avoid session fixation
-  // If sessionId exists and logged in session, return it
+  // Perform eviction of stale sessions on each validation to enforce expiration
+  evictExpiredSessions(); // SECURITY FIX: evict expired sessions every validation
+
+  // Check if session exists and is not expired
   if (sessionId && sessions[sessionId] && sessions[sessionId].userId !== null) {
-    return sessions[sessionId];
+    if (sessions[sessionId].expires > Date.now()) {
+      return sessions[sessionId];
+    } else {
+      // Session expired, remove it
+      delete sessions[sessionId];
+    }
   }
   // Otherwise, create a new unauthenticated session with a secure random session ID
   const newSessionId = crypto.randomBytes(32).toString('hex'); // cryptographically strong ID
@@ -49,6 +74,7 @@ function validateSession(sessionId) {
     userId: null,
     data: {},
     created: Date.now(),
+    expires: Date.now() + SESSION_EXPIRATION_MS, // SECURITY FIX: set expiration for unauthenticated session
   };
   return sessions[newSessionId];
 }
