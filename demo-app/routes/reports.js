@@ -58,13 +58,12 @@ router.post('/password-reset', (req, res) => {
     ).run(resetToken, Date.now() + 3600000, email);
   } catch (e) { /* ignore if column doesn't exist */ }
 
-  // VULN: Leaking whether email exists in system (user enumeration)
-  const user = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
-  if (user) {
-    res.json({ message: 'Reset link sent', token: resetToken }); // Also exposing token in response!
-  } else {
-    res.status(404).json({ error: 'No account found with that email' });
-  }
+  // FIX: Avoid user enumeration and token leakage
+  // Always respond with a success message regardless of whether the email exists
+  res.json({ message: 'If an account with that email exists, a reset link has been sent.' });
+
+  // SECURITY COMMENT: Removed differentiating responses and token exposure to prevent
+  // information disclosure and user enumeration attacks
 });
 
 // VULN #34: Hardcoded API Key / Third-Party Credentials (CWE-798)
