@@ -15,14 +15,20 @@ function generateSessionId(userId) {
 }
 
 // VULN #37: In-Memory Session Store Without Size Limit (CWE-400)
-// No eviction policy, no max size - memory exhaustion DoS
+// FIXED: Implement max session store size and automatic oldest session eviction to prevent memory exhaustion DoS
+const MAX_SESSIONS = 10000;
 const sessions = {};
+const sessionOrder = []; // Keep track of insertion order for eviction
 
 function createSession(userId, userData) {
   const sessionId = generateSessionId(userId);
 
-  // No limit on number of sessions per user or total
-  // No expiration mechanism
+  // If we reached max sessions, evict oldest session to limit memory usage
+  if (sessionOrder.length >= MAX_SESSIONS) {
+    const oldestSessionId = sessionOrder.shift();
+    delete sessions[oldestSessionId];
+  }
+
   sessions[sessionId] = {
     userId,
     data: userData,
@@ -31,6 +37,8 @@ function createSession(userId, userData) {
     ip: null,               // Not binding session to IP
     userAgent: null,         // Not binding to user agent
   };
+
+  sessionOrder.push(sessionId);
 
   return sessionId;
 }
@@ -45,11 +53,20 @@ function validateSession(sessionId) {
   }
   // Otherwise, create a new unauthenticated session with a secure random session ID
   const newSessionId = crypto.randomBytes(32).toString('hex'); // cryptographically strong ID
+
+  // If at max sessions, evict oldest session before adding new one
+  if (sessionOrder.length >= MAX_SESSIONS) {
+    const oldestSessionId = sessionOrder.shift();
+    delete sessions[oldestSessionId];
+  }
+
   sessions[newSessionId] = {
     userId: null,
     data: {},
     created: Date.now(),
   };
+  sessionOrder.push(newSessionId);
+
   return sessions[newSessionId];
 }
 
