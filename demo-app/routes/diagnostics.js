@@ -112,14 +112,44 @@ router.post('/import-config', (req, res) => {
     return res.status(400).json({ error: 'Compressed config data required' });
   }
 
-  try {
-    // VULNERABLE: No size limit on decompressed output
-    // A 1KB gzip payload can decompress to 1GB+ (gzip bomb)
-    // This will exhaust server memory and crash the process
-    const buffer = Buffer.from(compressedData, 'base64');
-    const decompressed = zlib.gunzipSync(buffer);
+  const MAX_DECOMPRESSED_SIZE = 10 * 1024 * 1024; // 10MB max decompressed size
 
-    // Process the entire decompressed content in memory
+  try {
+    const buffer = Buffer.from(compressedData, 'base64');
+
+    // SECURITY FIX: Use streaming decompression with size limit to prevent zip bomb
+    let totalDecompressedLength = 0;
+    const chunks = [];
+
+    // Create a gunzip stream
+    const gunzip = zlib.createGunzip();
+
+    // Feed the buffer into the stream and collect chunks
+    gunzip.on('data', (chunk) => {
+      totalDecompressedLength += chunk.length;
+      // If decompressed data exceeds limit, abort to prevent resource exhaustion
+      if (totalDecompressedLength > MAX_DECOMPRESSED_SIZE) {
+        gunzip.destroy(new Error('Decompressed data exceeds allowed size limit'));
+      } else {
+        chunks.push(chunk);
+      }
+    });
+
+    gunzip.on('error', (err) => {
+      // Handle decompression errors
+      // This error will be caught in the try/catch below via stream pipeline
+    });
+
+    gunzip.end(buffer);
+
+    // Wait for stream to finish (using a Promise for sync-like behavior)
+    await new Promise((resolve, reject) => {
+      gunzip.on('end', resolve);
+      gunzip.on('error', reject);
+    });
+
+    const decompressed = Buffer.concat(chunks);
+
     const config = JSON.parse(decompressed.toString('utf-8'));
 
     res.json({
