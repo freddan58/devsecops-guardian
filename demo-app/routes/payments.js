@@ -60,12 +60,12 @@ router.post('/request', authenticateToken, (req, res) => {
     'INSERT INTO transactions (reference, amount, description, verification_code, user_id) VALUES (?, ?, ?, ?, ?)'
   ).run(transactionRef, amount, description, verificationCode, req.user.id);
 
-  // VULN #19: Sensitive data in URL / GET parameters (CWE-598)
-  // Verification code sent in redirect URL (appears in logs, browser history, referrer headers)
+  // FIX: Do NOT send sensitive verification codes in URL params to prevent exposure in logs and browser history
+  // Instead, send verificationCode and transactionRef securely in response body without embedding in a URL
   res.json({
     reference: transactionRef,
-    verify_url: `/api/payments/verify?ref=${transactionRef}&code=${verificationCode}&amount=${amount}`,
-    message: 'Complete payment by visiting the verify URL',
+    verification_code: verificationCode, // Sending code in response body securely
+    message: 'Complete payment by submitting verification code via POST to /api/payments/verify',
   });
 });
 
