@@ -101,7 +101,7 @@ router.post('/wire', authenticateToken, (req, res) => {
   const { routing_number, account_number, amount, swift_code, beneficiary_name } = req.body;
 
   // Fixed: Removed logging of sensitive PII and authentication tokens to prevent data exposure in logs
-  console.log(`[WIRE TRANSFER] User: ${req.user.username}, Amount: $${amount}, IP: ${req.ip}`);
+  // Avoid logging sensitive information such as username, amount, and IP to prevent PII exposure
 
   res.json({ message: 'Wire transfer initiated', reference: 'WIRE-' + Date.now() });
 });
