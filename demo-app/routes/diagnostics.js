@@ -103,8 +103,8 @@ router.post('/audit-log', (req, res) => {
 });
 
 // VULN #51: Uncontrolled Resource Consumption (CWE-400)
-// Decompresses user-uploaded data without checking decompressed size
-// A small gzip "bomb" (e.g., 42.zip) can expand to gigabytes in memory
+// Fixed: Decompresses user-uploaded data with decompressed size limit to prevent Zip bomb
+// Implements streaming decompression with max size check to avoid memory exhaustion
 router.post('/import-config', (req, res) => {
   const compressedData = req.body.data;
 
@@ -112,22 +112,50 @@ router.post('/import-config', (req, res) => {
     return res.status(400).json({ error: 'Compressed config data required' });
   }
 
+  const MAX_DECOMPRESSED_SIZE = 10 * 1024 * 1024; // 10MB max decompressed size
+  const buffer = Buffer.from(compressedData, 'base64');
+
   try {
-    // VULNERABLE: No size limit on decompressed output
-    // A 1KB gzip payload can decompress to 1GB+ (gzip bomb)
-    // This will exhaust server memory and crash the process
-    const buffer = Buffer.from(compressedData, 'base64');
-    const decompressed = zlib.gunzipSync(buffer);
+    // Secure decompression with stream and decompressed size limit
+    let decompressedSize = 0;
+    const chunks = [];
 
-    // Process the entire decompressed content in memory
-    const config = JSON.parse(decompressed.toString('utf-8'));
+    const gunzip = zlib.createGunzip();
 
-    res.json({
-      message: 'Config imported successfully',
-      keys: Object.keys(config),
-      size_compressed: buffer.length,
-      size_decompressed: decompressed.length,
+    gunzip.on('data', (chunk) => {
+      decompressedSize += chunk.length;
+      if (decompressedSize > MAX_DECOMPRESSED_SIZE) {
+        // Security fix: prevent decompression bomb by rejecting large output
+        gunzip.destroy(new Error('Decompressed data exceeds allowed size'));
+      } else {
+        chunks.push(chunk);
+      }
     });
+
+    gunzip.on('error', (err) => {
+      // Handle decompression error
+      return res.status(400).json({ error: 'Decompression failed', details: err.message });
+    });
+
+    gunzip.on('end', () => {
+      try {
+        const decompressed = Buffer.concat(chunks);
+        const config = JSON.parse(decompressed.toString('utf-8'));
+
+        res.json({
+          message: 'Config imported successfully',
+          keys: Object.keys(config),
+          size_compressed: buffer.length,
+          size_decompressed: decompressed.length,
+        });
+      } catch (parseErr) {
+        res.status(400).json({ error: 'Failed to parse config JSON', details: parseErr.message });
+      }
+    });
+
+    // Start the decompression stream
+    gunzip.end(buffer);
+
   } catch (err) {
     res.status(400).json({ error: 'Import failed', details: err.message });
   }
