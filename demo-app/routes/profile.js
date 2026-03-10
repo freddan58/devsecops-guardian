@@ -76,6 +76,7 @@ router.post('/change-password', authenticateToken, (req, res) => {
 // VULN #46: NoSQL-style Injection via JSON query operators (CWE-943)
 // Accepts arbitrary MongoDB-style query operators in the search body,
 // allowing attackers to bypass filters or extract data they shouldn't access
+// FIXED: Use parameterized queries and restrict filter keys to allowed columns to prevent SQL injection
 router.post('/search', (req, res) => {
   const { filter } = req.body;
 
@@ -86,16 +87,36 @@ router.post('/search', (req, res) => {
   try {
     const db = getDatabase();
 
-    // VULNERABLE: Dynamically builds WHERE clause from user-controlled JSON
-    // Attacker can send: { "filter": { "role": "admin", "1=1 OR username": "anything" } }
-    const conditions = Object.entries(filter)
-      .map(([key, value]) => `${key} = '${value}'`)  // SQL injection via key AND value
-      .join(' AND ');
+    // Define allowed columns to whitelist filter keys
+    const allowedColumns = new Set(['id', 'username', 'email', 'role']);
 
-    const query = `SELECT id, username, email, role FROM users WHERE ${conditions}`;
-    const users = db.prepare(query).all();
+    const conditions = [];
+    const values = [];
 
-    res.json({ results: users, query_used: query });  // Also leaks the query
+    for (const [key, value] of Object.entries(filter)) {
+      if (!allowedColumns.has(key)) {
+        // Ignore disallowed keys
+        continue;
+      }
+
+      // Use parameterized query placeholder for value
+      conditions.push(`${key} = ?`);
+      values.push(value);
+    }
+
+    if (conditions.length === 0) {
+      // No valid filters provided
+      return res.status(400).json({ error: 'No valid filter keys provided' });
+    }
+
+    const whereClause = conditions.join(' AND ');
+    const query = `SELECT id, username, email, role FROM users WHERE ${whereClause}`;
+
+    const stmt = db.prepare(query);
+    const users = stmt.all(...values);
+
+    // Remove query_used from response to avoid leaking raw SQL
+    res.json({ results: users });
   } catch (err) {
     res.status(500).json({ error: 'Search failed', details: err.message });
   }
