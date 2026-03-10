@@ -77,7 +77,6 @@ router.post('/subscribe', authenticateToken, (req, res) => {
 });
 
 // VULN #30: Improper Error Handling - Stack Trace Exposure (CWE-209)
-// Full stack traces and internal details exposed to client
 router.get('/history', authenticateToken, (req, res) => {
   try {
     const db = getDatabase();
@@ -88,17 +87,16 @@ router.get('/history', authenticateToken, (req, res) => {
 
     res.json({ data: notifications });
   } catch (err) {
-    // VULNERABLE: Exposes full error details including stack trace, file paths
-    res.status(500).json({
-      error: err.message,
-      stack: err.stack,           // Full stack trace with file paths
+    // Fixed: Log detailed errors server-side and send generic error message to client
+    console.error('Notification history retrieval error:', {
+      message: err.message,
       code: err.code,
       errno: err.errno,
-      sql_state: err.sqlState,
-      query: err.sql,             // Leaks the SQL query
-      database_path: process.env.DATABASE_URL || '/app/banking.db',
-      node_env: process.env.NODE_ENV,
+      sqlState: err.sqlState,
+      // Do NOT log stack trace or sensitive info in production logs, consider sanitizing if needed
     });
+
+    res.status(500).json({ error: 'An internal server error occurred' });
   }
 });
 
