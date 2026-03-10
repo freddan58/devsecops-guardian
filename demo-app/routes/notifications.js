@@ -103,14 +103,25 @@ router.get('/history', authenticateToken, (req, res) => {
 });
 
 // VULN #31: HTTP Response Splitting / Header Injection (CWE-113)
-// User input directly in response headers
+// Fixed by sanitizing header values to reject CRLF characters and prevent header injection 
 router.get('/unsubscribe', (req, res) => {
   const { token, redirect } = req.query;
 
-  // User-controlled value in response header
-  // Attacker: redirect=foo%0d%0aSet-Cookie:%20admin=true
-  res.setHeader('X-Unsubscribe-Redirect', redirect || '/');
-  res.setHeader('X-Token-Used', token || 'none');
+  // Sanitize input to prevent CRLF injection
+  function sanitizeForHeader(value) {
+    if (typeof value !== 'string') return '';
+    // Reject any CR or LF characters to prevent header injection
+    if (/\r|\n/.test(value)) {
+      return '';
+    }
+    return value;
+  }
+
+  const safeRedirect = sanitizeForHeader(redirect) || '/';
+  const safeToken = sanitizeForHeader(token) || 'none';
+
+  res.setHeader('X-Unsubscribe-Redirect', safeRedirect);
+  res.setHeader('X-Token-Used', safeToken);
 
   res.json({ message: 'Unsubscribed successfully' });
 });
